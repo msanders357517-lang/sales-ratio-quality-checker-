@@ -55,3 +55,8 @@ Good-sale statistical calculations including median, weighted mean, PRD, and COD
 County-level median/COD review threshold logic.
 
 The original VBA package is very large and contains extensive Excel-specific presentation, worksheet-navigation, formula-protection, drill-down, comment, chart, and reconciliation behavior. Those Excel-only interface behaviors are intentionally represented as web tables/dashboard interactions rather than VBA objects.
+
+
+URL
+https://sale-ratio-quality-checker.streamlit.app/
+
