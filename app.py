@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from mapping_layer import canonicalize
+from mapping_layer import canonicalize, mapping_options, DERIVED_RATIO_OPTION, DO_NOT_MAP_OPTION
 
 from engine import (
     STATUS_COL,
@@ -36,7 +36,7 @@ st.caption("Browser-based version of the Excel/VBA Sales Ratio Quality Checker w
 for key, default in {
     "df": None, "original_df": None, "raw_df": None, "source_name": None, "last_summary": {},
     "extra_tables": {}, "last_tool": None, "prepared": False,
-    "mapping_report": None, "vendor_detection": None,
+    "mapping_report": None, "vendor_detection": None, "mapping_overrides": {},
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -55,6 +55,7 @@ with st.sidebar:
                 st.session_state.original_df = df.copy()
                 st.session_state.mapping_report = mapping_report
                 st.session_state.vendor_detection = vendor_detection
+                st.session_state.mapping_overrides = {}
                 st.session_state.source_name = upload.name
                 st.session_state.upload_signature = signature
                 st.session_state.last_summary = {
@@ -75,10 +76,10 @@ with st.sidebar:
     st.divider()
     st.header("Workspace")
     if st.button("🧹 Clear All", use_container_width=True):
-        for k in ["df", "original_df", "raw_df", "source_name", "last_summary", "extra_tables", "last_tool", "prepared", "upload_signature", "mapping_report", "vendor_detection"]:
+        for k in ["df", "original_df", "raw_df", "source_name", "last_summary", "extra_tables", "last_tool", "prepared", "upload_signature", "mapping_report", "vendor_detection", "mapping_overrides"]:
             if k in {"df", "original_df", "raw_df", "source_name", "last_tool", "upload_signature", "mapping_report", "vendor_detection"}:
                 st.session_state[k] = None
-            elif k in {"last_summary", "extra_tables"}:
+            elif k in {"last_summary", "extra_tables", "mapping_overrides"}:
                 st.session_state[k] = {}
             else:
                 st.session_state[k] = False
@@ -105,14 +106,67 @@ c3.metric("Vendor", vd.get("vendor", "Unknown"))
 c4.metric("Prepared", "Yes" if st.session_state.prepared else "No")
 c5.metric("Last Tool", st.session_state.last_tool or "—")
 
-with st.expander("🔀 Vendor Mapping Report", expanded=False):
-    st.caption("The application detects the vendor format first, maps recognized source fields to canonical Analysis fields, then sends that standardized data to the checkers.")
-    if st.session_state.mapping_report is not None:
-        st.dataframe(st.session_state.mapping_report, use_container_width=True, hide_index=True)
-    else:
-        st.caption("No mapping report is available.")
+st.subheader("2 · Field Mapping Review")
+st.caption("Review the proposed source field for each standardized application field. Change any selection before running the checkers. Your selection becomes authoritative for the analytical engine.")
 
-st.subheader("2 · Tool Menu")
+raw_map_df = st.session_state.raw_df
+map_report = st.session_state.mapping_report
+if raw_map_df is not None and map_report is not None:
+    with st.form("field_mapping_form"):
+        mapping_choices = {}
+        display_rows = map_report[map_report["Canonical Header"].astype(str).str.len() > 0].copy()
+        for start in range(0, len(display_rows), 2):
+            cols = st.columns(2)
+            for ui_col, (_, row) in zip(cols, display_rows.iloc[start:start+2].iterrows()):
+                field = str(row["System Field"])
+                canonical = str(row["Canonical Header"])
+                options = mapping_options(raw_map_df, field, row)
+                current = st.session_state.mapping_overrides.get(field)
+                if current is None:
+                    detected = str(row.get("Detected Header", "") or "")
+                    if detected.startswith("DERIVED:"):
+                        current = DERIVED_RATIO_OPTION
+                    elif detected in options:
+                        current = detected
+                    elif field == "sales_ratio" and str(row.get("Status", "")) == "Missing":
+                        current = DERIVED_RATIO_OPTION
+                    else:
+                        current = DO_NOT_MAP_OPTION
+                if current not in options:
+                    options.insert(0, current)
+                idx = options.index(current)
+                mapping_choices[field] = ui_col.selectbox(
+                    canonical, options, index=idx, key=f"map_select_{field}",
+                    help=f"Choose which uploaded source column should become the standardized {canonical} field."
+                )
+        apply_mapping = st.form_submit_button("✅ Apply Field Mapping", use_container_width=True)
+
+    if apply_mapping:
+        try:
+            mapped_df, new_report, new_detection = canonicalize(raw_map_df, overrides=mapping_choices)
+            st.session_state.mapping_overrides = mapping_choices.copy()
+            st.session_state.df = mapped_df
+            st.session_state.original_df = mapped_df.copy()
+            st.session_state.mapping_report = new_report
+            st.session_state.vendor_detection = new_detection
+            st.session_state.last_summary = {
+                "status": "Field mapping applied",
+                "detected_vendor": new_detection.get("vendor", "Unknown"),
+                "rows_loaded": len(mapped_df),
+                "columns_loaded": len(mapped_df.columns),
+            }
+            st.session_state.extra_tables = {}
+            st.session_state.last_tool = None
+            st.session_state.prepared = False
+            st.success("Field mapping applied. The checker engine will now use these standardized selections.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not apply the selected field mapping: {e}")
+
+    with st.expander("🔎 Mapping Details", expanded=False):
+        st.dataframe(st.session_state.mapping_report, use_container_width=True, hide_index=True)
+
+st.subheader("3 · Tool Menu")
 st.caption("Run tools in any order. Use **Prepare Data** between diagnostics when you want to strip prior generated status columns and start the next check cleanly.")
 
 # 3x3 icon menu matching the workbook's conceptual tools.
@@ -174,7 +228,7 @@ if reset_results:
     st.rerun()
 
 st.divider()
-st.subheader("3 · Dashboard")
+st.subheader("4 · Dashboard")
 summary = st.session_state.last_summary or {}
 if summary:
     pairs = list(summary.items())
@@ -194,7 +248,7 @@ for name, table in (st.session_state.extra_tables or {}).items():
     with st.expander(name, expanded=True):
         st.dataframe(table, use_container_width=True, hide_index=True)
 
-st.subheader("4 · Analysis Results")
+st.subheader("5 · Analysis Results")
 df_view = st.session_state.df
 show_only_issues = st.toggle("Show only rows requiring review", value=False)
 if show_only_issues and STATUS_COL in df_view.columns:
@@ -202,7 +256,7 @@ if show_only_issues and STATUS_COL in df_view.columns:
     df_view = df_view.loc[mask]
 st.dataframe(df_view, use_container_width=True, hide_index=True, height=560)
 
-st.subheader("5 · Export")
+st.subheader("6 · Export")
 try:
     xlsx_bytes = export_results_xlsx(st.session_state.df, st.session_state.last_summary or {}, st.session_state.extra_tables or {})
     stem = (st.session_state.source_name or "sales_ratio").rsplit(".", 1)[0]
