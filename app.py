@@ -4,6 +4,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from mapping_layer import canonicalize
+
 from engine import (
     STATUS_COL,
     appraisal_value_checker,
@@ -32,8 +34,9 @@ st.title("📊 Sales Ratio Quality Checker")
 st.caption("Browser-based version of the Excel/VBA Sales Ratio Quality Checker workflow")
 
 for key, default in {
-    "df": None, "original_df": None, "source_name": None, "last_summary": {},
+    "df": None, "original_df": None, "raw_df": None, "source_name": None, "last_summary": {},
     "extra_tables": {}, "last_tool": None, "prepared": False,
+    "mapping_report": None, "vendor_detection": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -45,23 +48,40 @@ with st.sidebar:
         signature = (upload.name, upload.size)
         if st.session_state.get("upload_signature") != signature:
             try:
-                df, sheet = read_uploaded_workbook(upload.getvalue(), upload.name)
+                raw_df, sheet = read_uploaded_workbook(upload.getvalue(), upload.name)
+                df, mapping_report, vendor_detection = canonicalize(raw_df)
+                st.session_state.raw_df = raw_df.copy()
                 st.session_state.df = df
                 st.session_state.original_df = df.copy()
+                st.session_state.mapping_report = mapping_report
+                st.session_state.vendor_detection = vendor_detection
                 st.session_state.source_name = upload.name
                 st.session_state.upload_signature = signature
-                st.session_state.last_summary = {"source_sheet": sheet, "rows_loaded": len(df), "columns_loaded": len(df.columns)}
+                st.session_state.last_summary = {
+                    "source_sheet": sheet,
+                    "detected_vendor": vendor_detection.get("vendor", "Unknown"),
+                    "vendor_confidence": vendor_detection.get("confidence", 0),
+                    "rows_loaded": len(df),
+                    "columns_loaded": len(df.columns),
+                }
                 st.session_state.extra_tables = {}
                 st.session_state.prepared = False
-                st.success(f"Loaded {len(df):,} rows from {sheet}.")
+                vendor_name = vendor_detection.get("vendor", "Unknown")
+                confidence = vendor_detection.get("confidence", 0)
+                st.success(f"Loaded {len(df):,} rows from {sheet}. Detected vendor: {vendor_name} ({confidence:.0%} profile match).")
             except Exception as e:
                 st.error(f"Could not open the workbook: {e}")
 
     st.divider()
     st.header("Workspace")
     if st.button("🧹 Clear All", use_container_width=True):
-        for k in ["df", "original_df", "source_name", "last_summary", "extra_tables", "last_tool", "prepared", "upload_signature"]:
-            st.session_state[k] = None if k in {"df", "original_df", "source_name", "last_tool", "upload_signature"} else ({} if k in {"last_summary", "extra_tables"} else False)
+        for k in ["df", "original_df", "raw_df", "source_name", "last_summary", "extra_tables", "last_tool", "prepared", "upload_signature", "mapping_report", "vendor_detection"]:
+            if k in {"df", "original_df", "raw_df", "source_name", "last_tool", "upload_signature", "mapping_report", "vendor_detection"}:
+                st.session_state[k] = None
+            elif k in {"last_summary", "extra_tables"}:
+                st.session_state[k] = {}
+            else:
+                st.session_state[k] = False
         st.rerun()
     if st.session_state.df is not None and st.button("↩️ Restore Uploaded Data", use_container_width=True):
         st.session_state.df = st.session_state.original_df.copy()
@@ -77,11 +97,20 @@ if st.session_state.df is None:
     st.stop()
 
 # Header/status area
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Rows", f"{len(st.session_state.df):,}")
 c2.metric("Columns", f"{len(st.session_state.df.columns):,}")
-c3.metric("Prepared", "Yes" if st.session_state.prepared else "No")
-c4.metric("Last Tool", st.session_state.last_tool or "—")
+vd = st.session_state.vendor_detection or {}
+c3.metric("Vendor", vd.get("vendor", "Unknown"))
+c4.metric("Prepared", "Yes" if st.session_state.prepared else "No")
+c5.metric("Last Tool", st.session_state.last_tool or "—")
+
+with st.expander("🔀 Vendor Mapping Report", expanded=False):
+    st.caption("The application detects the vendor format first, maps recognized source fields to canonical Analysis fields, then sends that standardized data to the checkers.")
+    if st.session_state.mapping_report is not None:
+        st.dataframe(st.session_state.mapping_report, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No mapping report is available.")
 
 st.subheader("2 · Tool Menu")
 st.caption("Run tools in any order. Use **Prepare Data** between diagnostics when you want to strip prior generated status columns and start the next check cleanly.")
