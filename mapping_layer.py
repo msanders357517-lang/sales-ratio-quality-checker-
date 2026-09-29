@@ -68,6 +68,33 @@ def canonicalize(df):
   if r['Status']!='Mapped':continue
   f=r['System Field']; target=CANONICAL_NAMES.get(f); src=r['Detected Header']
   if target and target not in out.columns: out[target]=out[src]
+
+ # Delta rule: USE CODE is authoritative. Never infer Use Code from
+ # IMPROVEMENT_CODE or another generic CODE column for a detected Delta report.
+ if vendor == 'Delta':
+  delta_use = next((c for c in out.columns if normalize_header(c) == normalize_header('USE CODE')), None)
+  if delta_use is not None:
+   out['Use Code'] = out[delta_use]
+
+ # If a vendor does not supply a Sales Ratio, derive the canonical ratio from
+ # mapped Total Value / mapped Sale Price. Zero or missing prices remain blank.
+ if 'Sales Ratio' not in out.columns or pd.to_numeric(out['Sales Ratio'], errors='coerce').notna().sum() == 0:
+  if 'Total Value' in out.columns and 'Sale Price' in out.columns:
+   tv = pd.to_numeric(out['Total Value'], errors='coerce')
+   sp = pd.to_numeric(out['Sale Price'], errors='coerce')
+   out['Sales Ratio'] = (tv / sp.where(sp != 0)).replace([float('inf'), float('-inf')], pd.NA)
+   # Surface the derivation in the mapping report.
+   mask = report['System Field'].eq('sales_ratio')
+   if mask.any():
+    report.loc[mask, 'Detected Header'] = 'DERIVED: Total Value / Sale Price'
+    report.loc[mask, 'Status'] = 'Mapped'
+    if 'Method' in report.columns: report.loc[mask, 'Method'] = 'Calculated'
+   else:
+    extra = {c:'' for c in report.columns}
+    extra.update({'System Field':'sales_ratio','Detected Header':'DERIVED: Total Value / Sale Price','Status':'Mapped'})
+    if 'Method' in extra: extra['Method']='Calculated'
+    report = pd.concat([report, pd.DataFrame([extra])], ignore_index=True)
+
  # exact VBA date priority + split-date construction
  pos=_header_positions(out.columns)
  def col(n):
