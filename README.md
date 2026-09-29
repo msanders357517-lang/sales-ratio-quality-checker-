@@ -104,7 +104,6 @@ and the original VBA workflow.
   Vendor / Format    Supported
   ----------------- -----------
   Assurance             ✅
-  Assurance2            ✅
   Delta                 ✅
   S&W                   ✅
   Capture               ✅
