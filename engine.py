@@ -117,10 +117,26 @@ def normalize_code(value: object) -> str:
     try:
         f = float(s)
         if math.isfinite(f) and f.is_integer():
-            return str(int(f))
+            s = str(int(f))
+        else:
+            s = s.upper().replace(" ", "").replace("-", "").replace("_", "")
     except Exception:
-        pass
-    return s.upper().replace(" ", "").replace("-", "").replace("_", "")
+        s = s.upper().replace(" ", "").replace("-", "").replace("_", "")
+
+    # Four-digit Use Code normalization:
+    # - 0100 -> 100 (remove only the leading outside zero)
+    # - 1000 -> 100 (remove the trailing outside zero)
+    # - 0101 -> 101
+    # - 1010 -> 101
+    # If both outside digits are zero, remove only one zero so a
+    # four-digit code does not lose both ends (e.g. 0100 -> 100, not 10).
+    if len(s) == 4 and s.isdigit():
+        if s.startswith("0"):
+            s = s[1:]
+        elif s.endswith("0"):
+            s = s[:-1]
+    return s.upper()
+
 
 
 def clean_text(value: object) -> str:
@@ -145,7 +161,20 @@ def _colmap(df: pd.DataFrame) -> Dict[str, List[str]]:
     return out
 
 
+CANONICAL_ENGINE_FIELDS = {
+    "parcel": "Parcel Number", "sale_price": "Sale Price", "land_value": "Land Value",
+    "improvement_value": "Improvement Value", "misc_value": "Miscellaneous Value",
+    "total_value": "Total Value", "use_code": "Use Code", "type": "Type",
+    "ratio": "Sales Ratio", "qualification": "Qualification", "neighborhood": "Neighborhood",
+    "grantor": "Grantor", "grantee": "Grantee", "comment": "Comments",
+    "sale_date": "Sale Date", "deed_book": "Deed Book", "deed_page": "Deed Page",
+}
+
 def columns_for(df: pd.DataFrame, logical_name: str) -> List[str]:
+    # A reviewed canonical mapping is authoritative. Do not re-add raw alias columns.
+    canonical = CANONICAL_ENGINE_FIELDS.get(logical_name)
+    if canonical in df.columns:
+        return [canonical]
     norm_map = _colmap(df)
     found: List[str] = []
     for alias in HEADER_ALIASES.get(logical_name, []):
