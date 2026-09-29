@@ -50,6 +50,30 @@ def choose(df,field,cols):
  if not cols:return None
  return max(cols,key=lambda c:(_valid(df[c],field),_pop(df[c]),-list(df.columns).index(c)))
 
+DERIVED_RATIO_OPTION = "Calculate: Total Value / Sale Price"
+DO_NOT_MAP_OPTION = "Do Not Map"
+
+
+def mapping_options(df, field, report_row=None):
+    """Return user-selectable source columns for a canonical field."""
+    candidates = []
+    if report_row is not None:
+        raw = str(report_row.get('Candidate Headers', '') or '')
+        candidates.extend([x.strip() for x in raw.split('|') if x.strip()])
+        detected = str(report_row.get('Detected Header', '') or '').strip()
+        if detected and not detected.startswith('DERIVED:'):
+            candidates.insert(0, detected)
+    # Let the analyst override to any raw source field, not just recognized aliases.
+    candidates.extend([str(c) for c in df.columns])
+    seen=[]
+    for c in candidates:
+        if c not in seen: seen.append(c)
+    if field == 'sales_ratio':
+        seen.append(DERIVED_RATIO_OPTION)
+    seen.append(DO_NOT_MAP_OPTION)
+    return seen
+
+
 def map_report(df):
  det=detect_vendor(df.columns); vendor=det['vendor']; profile=VENDOR_PROFILES.get(vendor,{})
  rows=[]
@@ -62,48 +86,65 @@ def map_report(df):
   rows.append({'Vendor':vendor,'System Field':field,'Canonical Header':CANONICAL_NAMES.get(field,field),'Detected Header':sel or '', 'Status':'Mapped' if sel and p else ('Empty' if sel else 'Missing'),'Candidate Headers':' | '.join(map(str,cand)),'Populated Rows':p,'Method':'Exact vendor profile' if exact else ('VBA/general alias fallback' if cand else 'No match')})
  return pd.DataFrame(rows),det
 
-def canonicalize(df):
- report,det=map_report(df); out=df.copy(); vendor=det['vendor']; profile=VENDOR_PROFILES.get(vendor,{})
- for _,r in report.iterrows():
-  if r['Status']!='Mapped':continue
-  f=r['System Field']; target=CANONICAL_NAMES.get(f); src=r['Detected Header']
-  if target and target not in out.columns: out[target]=out[src]
 
- # Delta rule: USE CODE is authoritative. Never infer Use Code from
- # IMPROVEMENT_CODE or another generic CODE column for a detected Delta report.
- if vendor == 'Delta':
-  delta_use = next((c for c in out.columns if normalize_header(c) == normalize_header('USE CODE')), None)
+def canonicalize(df, overrides=None):
+ report,det=map_report(df); out=df.copy(); vendor=det['vendor']
+ overrides = overrides or {}
+
+ # Apply explicit user choices first; otherwise use the mapper's recommendation.
+ for i,r in report.iterrows():
+  f=r['System Field']; target=CANONICAL_NAMES.get(f)
+  if not target: continue
+  chosen = overrides.get(f, r['Detected Header'])
+  if chosen == DO_NOT_MAP_OPTION:
+   report.loc[i, ['Detected Header','Status','Method']] = [DO_NOT_MAP_OPTION, 'Not Mapped', 'User selection']
+   if target in out.columns and target not in df.columns:
+    out.drop(columns=[target], inplace=True)
+   continue
+  if f == 'sales_ratio' and chosen == DERIVED_RATIO_OPTION:
+   report.loc[i, ['Detected Header','Status','Method']] = ['DERIVED: Total Value / Sale Price','Pending','User selection']
+   continue
+  if chosen in df.columns:
+   out[target] = df[chosen]
+   report.loc[i, 'Detected Header'] = chosen
+   report.loc[i, 'Status'] = 'Mapped' if _pop(df[chosen]) else 'Empty'
+   if f in overrides: report.loc[i, 'Method'] = 'User selection'
+
+ # Delta default remains USE CODE when the analyst has not explicitly overridden it.
+ if vendor == 'Delta' and 'use_code' not in overrides:
+  delta_use = next((c for c in df.columns if normalize_header(c) == normalize_header('USE CODE')), None)
   if delta_use is not None:
-   out['Use Code'] = out[delta_use]
+   out['Use Code'] = df[delta_use]
+   mask=report['System Field'].eq('use_code')
+   report.loc[mask,'Detected Header']=delta_use
+   report.loc[mask,'Status']='Mapped'
+   report.loc[mask,'Method']='Exact Delta USE CODE rule'
 
- # If a vendor does not supply a Sales Ratio, derive the canonical ratio from
- # mapped Total Value / mapped Sale Price. Zero or missing prices remain blank.
- if 'Sales Ratio' not in out.columns or pd.to_numeric(out['Sales Ratio'], errors='coerce').notna().sum() == 0:
-  if 'Total Value' in out.columns and 'Sale Price' in out.columns:
-   tv = pd.to_numeric(out['Total Value'], errors='coerce')
-   sp = pd.to_numeric(out['Sale Price'], errors='coerce')
-   out['Sales Ratio'] = (tv / sp.where(sp != 0)).replace([float('inf'), float('-inf')], pd.NA)
-   # Surface the derivation in the mapping report.
-   mask = report['System Field'].eq('sales_ratio')
-   if mask.any():
-    report.loc[mask, 'Detected Header'] = 'DERIVED: Total Value / Sale Price'
-    report.loc[mask, 'Status'] = 'Mapped'
-    if 'Method' in report.columns: report.loc[mask, 'Method'] = 'Calculated'
-   else:
-    extra = {c:'' for c in report.columns}
-    extra.update({'System Field':'sales_ratio','Detected Header':'DERIVED: Total Value / Sale Price','Status':'Mapped'})
-    if 'Method' in extra: extra['Method']='Calculated'
-    report = pd.concat([report, pd.DataFrame([extra])], ignore_index=True)
+ # Derive ratio when explicitly selected OR when no usable mapped ratio exists.
+ ratio_choice = overrides.get('sales_ratio')
+ need_ratio = ratio_choice == DERIVED_RATIO_OPTION or ('Sales Ratio' not in out.columns or pd.to_numeric(out['Sales Ratio'], errors='coerce').notna().sum() == 0)
+ if ratio_choice == DO_NOT_MAP_OPTION:
+  need_ratio = False
+ if need_ratio and 'Total Value' in out.columns and 'Sale Price' in out.columns:
+  tv = pd.to_numeric(out['Total Value'], errors='coerce')
+  sp = pd.to_numeric(out['Sale Price'], errors='coerce')
+  out['Sales Ratio'] = (tv / sp.where(sp != 0)).replace([float('inf'), float('-inf')], pd.NA)
+  mask = report['System Field'].eq('sales_ratio')
+  if mask.any():
+   report.loc[mask, 'Detected Header'] = 'DERIVED: Total Value / Sale Price'
+   report.loc[mask, 'Status'] = 'Mapped'
+   report.loc[mask, 'Method'] = 'Calculated' if 'sales_ratio' not in overrides else 'User selection: calculated'
 
- # exact VBA date priority + split-date construction
- pos=_header_positions(out.columns)
- def col(n):
-  xs=pos.get(normalize_header(n),[]); return out.columns[xs[0]] if xs else None
- d=col('D_DATE'); sd=col('Sale Date')
- if d is not None: out['Sale Date']=pd.to_datetime(out[d],errors='coerce')
- elif sd is not None: out['Sale Date']=pd.to_datetime(out[sd],errors='coerce')
- else:
-  y=col('SALE_DATE_YEAR');m=col('SALE_DATE_MONTH');day=col('SALE_DATE_DAY')
-  if y and m and day:
-   out['Sale Date']=pd.to_datetime(pd.DataFrame({'year':pd.to_numeric(out[y],errors='coerce'),'month':pd.to_numeric(out[m],errors='coerce'),'day':pd.to_numeric(out[day],errors='coerce')}),errors='coerce')
+ # exact VBA date priority unless the user explicitly selected a date source.
+ if 'sale_date' not in overrides:
+  pos=_header_positions(df.columns)
+  def col(n):
+   xs=pos.get(normalize_header(n),[]); return df.columns[xs[0]] if xs else None
+  d=col('D_DATE'); sd=col('Sale Date')
+  if d is not None: out['Sale Date']=pd.to_datetime(df[d],errors='coerce')
+  elif sd is not None: out['Sale Date']=pd.to_datetime(df[sd],errors='coerce')
+  else:
+   y=col('SALE_DATE_YEAR');m=col('SALE_DATE_MONTH');day=col('SALE_DATE_DAY')
+   if y and m and day:
+    out['Sale Date']=pd.to_datetime(pd.DataFrame({'year':pd.to_numeric(df[y],errors='coerce'),'month':pd.to_numeric(df[m],errors='coerce'),'day':pd.to_numeric(df[day],errors='coerce')}),errors='coerce')
  return out,report,det
