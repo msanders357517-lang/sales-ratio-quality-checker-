@@ -24,51 +24,23 @@ The **Sales Ratio Quality Checker** converts the original Excel/VBA workflow int
 12. Generate statistics when needed.
 13. Download the processed workbook.
 
-> 💡 **In-app help:** The application now includes a collapsible **📘 Instructions / User Guide** in the sidebar. It remains available while you work so you do not have to leave the application to review the workflow or checker descriptions.
+> 💡 **In-app guide:** The complete user-facing instructions are maintained directly in `app.py` and appear in the **📘 Instructions / User Guide** panel at the top of the application. The sidebar keeps a compact **📘 Help / Quick Reference** control.
 
 ---
 
+## 📘 User Guide Location
 
-## 📘 Where to Open the Instructions in the App
+The live application keeps the full user guide **inside `app.py`**, directly beneath the application title. The README is project/deployment documentation and is **not** loaded as the in-app guide.
 
-The live Streamlit app gives users two easy ways to open this README as the user guide:
-
-1. **Main page:** click **📘 Instructions / User Guide — Click to Open** directly below the app title.
-2. **Sidebar:** under **📘 Help**, click **Open Instructions / User Guide**.
-
-Both views load their content directly from this `README.md`. After you update and commit the README in GitHub and Streamlit redeploys the repository, the in-app guide displays the updated instructions.
-
----
-
-## 🔄 README ↔ In-App Instructions Sync
-
-`README.md` is the **single source of truth** for the app's instructions.
-
-The Streamlit application reads `README.md` directly from the same deployment folder as `app.py` and renders it inside:
-
-> **📘 Instructions / User Guide (README)**
-
-### What this means
-
-```text
-Edit README.md in GitHub
-        ↓
-Commit / push the change
-        ↓
-Streamlit redeploys the repository
-        ↓
-The in-app Instructions panel shows the updated README
-```
-
-You no longer need to edit instruction text separately inside `app.py`.
-
-> **Important:** The change appears in the live app after Streamlit has pulled/redeployed the new repository version. Editing the README on GitHub does not change an already-running deployment before that update is deployed.
+- **Main page:** click **📘 Instructions / User Guide — Click to Open**.
+- **Sidebar:** use **📘 Help / Quick Reference** for a short reminder while working.
+- Update the `APP_INSTRUCTIONS` text in `app.py` whenever the live user guide needs to change.
 
 ---
 
 ## 📑 Table of Contents
 
-- [README ↔ In-App Instructions Sync](#-readme--in-app-instructions-sync)
+- [User Guide Location](#-user-guide-location)
 - [Purpose](#-purpose)
 - [Application Workflow](#-application-workflow)
 - [Main Features](#-main-features)
@@ -138,7 +110,7 @@ Export Processed Workbook
 - ⚙️ Provides user-adjustable **overall/global and neighborhood ratio thresholds**, pre-set to the current code defaults.
 - 🗂️ Creates Use Code and Valuation Zone / Neighborhood statistical tables where available.
 - 📥 Exports processed results and dashboards to Excel.
-- 📘 Includes **in-app instructions loaded directly from `README.md`**, so documentation only needs to be maintained in one place.
+- 📘 Includes a complete **in-app user guide maintained directly in `app.py`**, plus a compact sidebar Help / Quick Reference control.
 
 ---
 
@@ -558,7 +530,7 @@ sales-ratio-quality-checker/
 | `vendor_profiles.json` | Vendor-specific mapping profiles |
 | `vendor_headers.json` | Known source-header information |
 | `requirements.txt` | Required Python packages |
-| `README.md` | Project and application documentation |
+| `README.md` | Project, setup, and deployment documentation (not the in-app user guide) |
 
 ---
 
