@@ -241,7 +241,6 @@ def render_user_instructions():
 
 
 st.title("📊 Sales Ratio Quality Checker")
-st.caption("Browser-based version of the Excel/VBA Sales Ratio Quality Checker workflow")
 
 with st.expander("📘 Instructions / User Guide — Click to Open", expanded=False):
     render_user_instructions()
