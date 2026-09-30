@@ -52,6 +52,7 @@ These instructions are built directly into the application and are the user guid
 - [Ratio Threshold Settings](#ratio-threshold-settings)
 - [Neighborhood Statistics](#neighborhood-statistics)
 - [Checker Reference](#checker-reference)
+- [Generate Statistics and VERIFY PASS](#generate-statistics-and-verify-pass)
 - [Dashboard, Results, and Export](#dashboard-results-and-export)
 - [Help and Review Tips](#help-and-review-tips)
 
@@ -64,8 +65,9 @@ These instructions are built directly into the application and are the user guid
 6. For ratio-based work, review **Ratio Threshold Settings** before running **Ratio Checker** or **Quality Checker**.
 7. Run the desired checker from **3 · Tool Menu**.
 8. Review **4 · Dashboard**, expand **🏘️ Neighborhood Statistics** when it is available, and review **5 · Analysis Results**.
-9. Turn on **Show only rows requiring review** to focus on exceptions.
-10. Use **6 · Export** to download the processed workbook.
+9. If you run **Generate Statistics**, treat **VERIFY PASS** as an overall screening result—not as proof that every neighborhood or subgroup is reliable. Review the neighborhood/valuation-zone tables and sale counts before relying on the overall status.
+10. Turn on **Show only rows requiring review** to focus on exceptions.
+11. Use **6 · Export** to download the processed workbook.
 
 ### Upload and Field Mapping
 The app looks for an **Analysis** worksheet first and otherwise uses the first worksheet in the uploaded Excel file. Supported upload types are `.xlsx`, `.xlsm`, `.xls`, and `.xlsb`.
@@ -145,6 +147,34 @@ Use this table together with the row-level result. A neighborhood or global flag
 
 **Bad Sale with No Comment:** the audit and Quality Checker treat this as its own review condition. A bad sale does not need to already have a comment in order to be flagged for missing documentation.
 
+### Generate Statistics and VERIFY PASS
+**Generate Statistics** summarizes the current prepared data so the analyst can evaluate the study as a whole and by important groups. If a Sales Ratio field is not already available, the statistics routine first derives/creates the ratios using the mapped ratio logic. The statistics are based primarily on sales classified as **GOOD** by the mapped qualification field.
+
+The generated output includes:
+- **Use Code Statistics** — groups the study by normalized Use Code.
+- **Valuation Zone Statistics** — groups the study by the mapped **Neighborhood** field so you can review each neighborhood/zone separately.
+- Counts for **Total Sales, Good Sales, Bad Sales, Undetermined Sales, and Good Ratios**.
+- Statistical measures such as **Mean, Median, Weighted Mean, Minimum, Maximum, Range, PRD, and COD**, plus appraisal and sale-price summaries when the required fields are available.
+- A Dashboard count of **Zones with 10+ Good Sales**, which shows how many neighborhoods/zones have at least 10 sales classified as GOOD.
+
+#### What VERIFY PASS means
+The **County Study Certification** shown by Generate Statistics is an **overall screening indicator**. The current program displays **VERIFY PASS** when both of these overall conditions are met:
+- the overall median ratio is between **0.9750 and 1.0244**; and
+- the overall COD is **20% or less**.
+
+If either condition is not met, the status is **REVIEW REQUIRED**.
+
+**Important: VERIFY PASS does not mean every neighborhood, Use Code, or individual sale passed.** It also does not mean the analyst should automatically rely on the overall county status without reviewing the underlying groups. A strong overall result can still contain neighborhoods with too few sales, unusual distributions, outliers, or local patterns that deserve attention.
+
+Before relying on **VERIFY PASS**, review the **Valuation Zone Statistics** and **Neighborhood Statistics** and ask:
+- Does each important neighborhood have enough **Good Sales** and **Good Ratios** to make its statistics meaningful?
+- Which neighborhoods have **10 or more Good Sales**, and which have fewer than 10? Neighborhoods with small samples should be interpreted more cautiously.
+- Are the neighborhood medians, CODs, ranges, and outlier counts reasonable, or is one neighborhood being hidden by a strong overall result?
+- Are there many **Bad** or **Undetermined** sales that could affect how representative the usable sample is?
+- Do the Global and Neighborhood ratio classifications agree with what you see in the grouped statistics?
+
+Think of **VERIFY PASS** as: **“the overall median and COD meet the program's current screening limits—now verify that the neighborhoods and underlying sales support that conclusion.”** Analyst review of sample size, neighborhood composition, outliers, qualification, and source data is still required before treating the overall result as dependable.
+
 ### Dashboard, Results, and Export
 After a checker runs, review the **Dashboard** first, then the record-level **Analysis Results**.
 
@@ -154,6 +184,7 @@ After a checker runs, review the **Dashboard** first, then the record-level **An
 - **Review / flagged** means one or more conditions require analyst attention.
 - **Missing** means a needed field is blank or unavailable; verify the field mapping first, then the source record.
 - **Calculated** means the app derived a value from mapped fields rather than relying on a supplied source value.
+- **VERIFY PASS** is an overall Generate Statistics screening result based on the current overall median and COD limits. It is **not** a blanket approval of every neighborhood or sale. Review neighborhood/valuation-zone sample sizes and statistics before relying on it.
 - Use **Download Processed Workbook** when the review is complete. The export carries the generated statuses/results for continued work in Excel.
 
 ### Help and Review Tips
@@ -166,7 +197,8 @@ Recommended review practices:
 - Rerun the Ratio or Quality Checker after changing thresholds.
 - Use Global and Neighborhood results together instead of treating either one as the only standard.
 - Use Neighborhood Statistics to understand local context before correcting a flagged ratio.
-- Treat flags as prompts for analyst review, not automatic proof of an error.
+- When Generate Statistics shows **VERIFY PASS**, still review Valuation Zone/Neighborhood Statistics, especially **Good Sales Count** and **Good Ratio Count**. Small neighborhood samples can make local statistics less reliable even when the overall study passes.
+- Treat flags and pass indicators as screening aids that support analyst judgment; neither one replaces review of the source data and the composition of the sales sample.
 """
 
 SIDEBAR_HELP = """
@@ -181,6 +213,7 @@ The full **📘 Instructions / User Guide** is at the top of the main page.
 - **Neighborhood:** compares the ratio with same-neighborhood limits.
 - **Critical dual outlier:** the same record is outside both Global and Neighborhood limits.
 - **Neighborhood Statistics:** appears under the Dashboard after Ratio or Quality analysis when data are available.
+- **Generate Statistics / VERIFY PASS:** VERIFY PASS only means the overall median and COD meet the current screening limits. Still review the neighborhood/valuation-zone counts and statistics—especially whether neighborhoods have enough good sales to support the overall conclusion.
 
 **Checker Quick Reference**
 
@@ -193,7 +226,7 @@ The full **📘 Instructions / User Guide** is at the top of the main page.
 | **Deed / MH / Comment Audit** | Reviews deed, party, qualification, manufactured-home, comment, duplicate, and bad-sale conditions. |
 | **Ratio Checker** | Calculates L, B, and L&B ratios and compares them with Global and Neighborhood limits. |
 | **Quality Checker** | Runs a broader combined quality review and identifies the reasons a record requires attention. |
-| **Generate Statistics** | Produces summary statistics for the current prepared/analysis data. |
+| **Generate Statistics** | Produces overall, Use Code, and neighborhood/valuation-zone statistics. A **VERIFY PASS** is an overall median/COD screening result; neighborhood sample sizes and local statistics still need review. |
 | **Clear Results** | Removes the current checker output while keeping the uploaded workbook loaded. |
 
 **Export / Download Processed Workbook**
