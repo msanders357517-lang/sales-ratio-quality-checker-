@@ -17,16 +17,28 @@ The **Sales Ratio Quality Checker** converts the original Excel/VBA workflow int
 5. Change any mapping that is not the field you want analyzed.
 6. Click **Apply Field Mapping**.
 7. Click **Prepare Data** and confirm **Prepared = Yes**.
-8. Run the desired checker.
-9. Review the **Dashboard** and **Analysis Results**.
-10. Use **Show only rows requiring review** to focus on exceptions.
-11. Generate statistics when needed.
-12. Download the processed workbook.
+8. Review **Ratio Threshold Settings** when using Ratio or Quality analysis. The defaults already match the current checker code.
+9. Run the desired checker.
+10. Review the **Dashboard** and **Analysis Results**.
+11. Use **Show only rows requiring review** to focus on exceptions.
+12. Generate statistics when needed.
+13. Download the processed workbook.
 
 > 💡 **In-app help:** The application now includes a collapsible **📘 Instructions / User Guide** in the sidebar. It remains available while you work so you do not have to leave the application to review the workflow or checker descriptions.
 
 ---
 
+
+## 📘 Where to Open the Instructions in the App
+
+The live Streamlit app gives users two easy ways to open this README as the user guide:
+
+1. **Main page:** click **📘 Instructions / User Guide — Click to Open** directly below the app title.
+2. **Sidebar:** under **📘 Help**, click **Open Instructions / User Guide**.
+
+Both views load their content directly from this `README.md`. After you update and commit the README in GitHub and Streamlit redeploys the repository, the in-app guide displays the updated instructions.
+
+---
 
 ## 🔄 README ↔ In-App Instructions Sync
 
@@ -63,6 +75,7 @@ You no longer need to edit instruction text separately inside `app.py`.
 - [Supported Report Formats](#-supported-report-formats)
 - [Vendor Mapping Layer](#-vendor-mapping-layer)
 - [Application Tools](#-application-tools)
+- [Ratio Threshold Settings](#️-ratio-threshold-settings)
 - [Neighborhood Statistics](#️-neighborhood-statistics)
 - [Dashboard and Results](#-dashboard-and-results)
 - [Excel Export](#-excel-export)
@@ -122,6 +135,7 @@ Export Processed Workbook
 - 📐 Calculates type-aware sales ratios.
 - 📈 Generates sales-ratio statistics.
 - 🏘️ Produces neighborhood-level ratio statistics and outlier counts.
+- ⚙️ Provides user-adjustable **overall/global and neighborhood ratio thresholds**, pre-set to the current code defaults.
 - 🗂️ Creates Use Code and Valuation Zone / Neighborhood statistical tables where available.
 - 📥 Exports processed results and dashboards to Excel.
 - 📘 Includes **in-app instructions loaded directly from `README.md`**, so documentation only needs to be maintained in one place.
@@ -407,6 +421,45 @@ Use this when you want to begin another analysis without re-uploading the source
 
 ---
 
+
+## ⚙️ Ratio Threshold Settings
+
+The app includes a collapsible **Ratio Threshold Settings** area between **Field Mapping Review** and the **Tool Menu**.
+
+The settings are automatically loaded with the existing checker requirements, so an analyst can simply leave them unchanged.
+
+### Current Overall / Global Defaults
+
+| Setting | Default |
+|---|---:|
+| Too Low for Global | Ratio `< 0.5000` |
+| Perfect Global minimum | `0.7000` |
+| Perfect Global maximum | `1.2000` |
+| Too High for Global | Ratio `> 1.5000` |
+
+Ratios between the Too Low cutoff and the Perfect range, or between the Perfect range and the Too High cutoff, are classified as **Acceptable Global**.
+
+### Current Neighborhood Default
+
+The existing neighborhood logic is retained as the default:
+
+- **Too Low:** below the neighborhood's 25th percentile (`Q1`)
+- **Acceptable:** from `Q1` through `Q3`
+- **Too High:** above the neighborhood's 75th percentile (`Q3`)
+
+The analyst can change the lower and upper neighborhood percentiles when needed.
+
+The app also provides an optional **Fixed Ratio Limits** mode. In that mode, the analyst enters one neighborhood low cutoff and one neighborhood high cutoff that apply to every neighborhood.
+
+### Applying or Resetting Settings
+
+- Click **Apply Threshold Settings** to make the selected values authoritative for the current session.
+- Click **Reset to Current Code Defaults** to restore the original checker requirements.
+- The selected settings are used by the **Ratio Checker**, **Quality Checker**, and **Neighborhood Statistics** table.
+- The Dashboard records the active global cutoffs and neighborhood threshold method after the Ratio or Quality Checker runs.
+
+---
+
 ## 🏘️ Neighborhood Statistics
 
 When the **Ratio Checker** or **Quality Checker** is run, the application can create a collapsible **Neighborhood Statistics** table.
@@ -414,6 +467,9 @@ When the **Ratio Checker** or **Quality Checker** is run, the application can cr
 Depending on available data, it can show:
 
 - Valid Sales
+- Threshold Method
+- Neighborhood Low Threshold
+- Neighborhood High Threshold
 - Q1
 - Median
 - Q3
