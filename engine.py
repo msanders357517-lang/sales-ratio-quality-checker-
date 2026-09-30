@@ -62,7 +62,105 @@ NATURAL_MIN_RATIO = 0.975
 NATURAL_MAX_RATIO = 1.0244
 TREND_MIN_RATIO = 0.995
 TREND_MAX_RATIO = 1.0044
+
 MAX_COD = 0.20
+
+# User-adjustable ratio settings. These defaults exactly preserve the
+# pre-existing checker behavior.
+DEFAULT_RATIO_THRESHOLDS = {
+    "global_too_low": GLOBAL_TOO_LOW,
+    "global_perfect_low": GLOBAL_PERFECT_LOW,
+    "global_perfect_high": GLOBAL_PERFECT_HIGH,
+    "global_too_high": GLOBAL_TOO_HIGH,
+    # Current neighborhood logic: below Q1 = low, above Q3 = high.
+    "neighborhood_method": "percentile",
+    "neighborhood_lower_percentile": 25.0,
+    "neighborhood_upper_percentile": 75.0,
+    # Used only when the analyst explicitly switches to Fixed Ratio Limits.
+    "neighborhood_fixed_low": GLOBAL_TOO_LOW,
+    "neighborhood_fixed_high": GLOBAL_TOO_HIGH,
+}
+
+
+def resolve_ratio_thresholds(settings: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """Merge analyst settings with the code defaults and validate them."""
+    resolved = dict(DEFAULT_RATIO_THRESHOLDS)
+    if settings:
+        for key in resolved:
+            if key in settings:
+                resolved[key] = settings[key]
+
+    numeric_keys = (
+        "global_too_low",
+        "global_perfect_low",
+        "global_perfect_high",
+        "global_too_high",
+        "neighborhood_lower_percentile",
+        "neighborhood_upper_percentile",
+        "neighborhood_fixed_low",
+        "neighborhood_fixed_high",
+    )
+    for key in numeric_keys:
+        resolved[key] = float(resolved[key])
+
+    if not (
+        resolved["global_too_low"]
+        <= resolved["global_perfect_low"]
+        <= resolved["global_perfect_high"]
+        <= resolved["global_too_high"]
+    ):
+        raise ValueError(
+            "Overall / Global ratio thresholds must be ordered as: "
+            "Too Low ≤ Perfect Low ≤ Perfect High ≤ Too High."
+        )
+
+    method = str(resolved.get("neighborhood_method", "percentile")).lower()
+    if method not in {"percentile", "fixed"}:
+        raise ValueError("Neighborhood threshold method must be 'percentile' or 'fixed'.")
+    resolved["neighborhood_method"] = method
+
+    if method == "percentile":
+        low_pct = resolved["neighborhood_lower_percentile"]
+        high_pct = resolved["neighborhood_upper_percentile"]
+        if not (0.0 <= low_pct < high_pct <= 100.0):
+            raise ValueError(
+                "Neighborhood percentile thresholds must satisfy "
+                "0 ≤ lower percentile < upper percentile ≤ 100."
+            )
+    else:
+        if not resolved["neighborhood_fixed_low"] < resolved["neighborhood_fixed_high"]:
+            raise ValueError(
+                "Neighborhood fixed thresholds require the low ratio to be less than the high ratio."
+            )
+    return resolved
+
+
+def _neighborhood_bounds(values: pd.Series, thresholds: Dict[str, object]) -> Tuple[float, float]:
+    """Return the low/high neighborhood thresholds for one neighborhood."""
+    vals = pd.to_numeric(values, errors="coerce").dropna()
+    if vals.empty:
+        return (float("nan"), float("nan"))
+    if thresholds["neighborhood_method"] == "fixed":
+        return (
+            float(thresholds["neighborhood_fixed_low"]),
+            float(thresholds["neighborhood_fixed_high"]),
+        )
+    return (
+        float(vals.quantile(float(thresholds["neighborhood_lower_percentile"]) / 100.0)),
+        float(vals.quantile(float(thresholds["neighborhood_upper_percentile"]) / 100.0)),
+    )
+
+
+def _neighborhood_method_label(thresholds: Dict[str, object]) -> str:
+    if thresholds["neighborhood_method"] == "fixed":
+        return (
+            f"Fixed {float(thresholds['neighborhood_fixed_low']):.4f}"
+            f"–{float(thresholds['neighborhood_fixed_high']):.4f}"
+        )
+    return (
+        f"Percentile P{float(thresholds['neighborhood_lower_percentile']):g}"
+        f"–P{float(thresholds['neighborhood_upper_percentile']):g}"
+    )
 
 GOOD_VALUES = {
     "Y", "YES", "TRUE", "1", "GOOD", "GOODSALE", "INCLUDE", "INCLUDED",
@@ -584,7 +682,11 @@ def _default_type(use_code: str) -> str:
     return ""
 
 
-def ratio_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+def ratio_checker(
+    df: pd.DataFrame,
+    threshold_settings: Optional[Dict[str, object]] = None,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
+    thresholds = resolve_ratio_thresholds(threshold_settings)
     out = df.copy()
     price_col = first_col(out, "sale_price")
     land_cols, imp_cols = columns_for(out, "land_value"), columns_for(out, "improvement_value")
@@ -592,7 +694,13 @@ def ratio_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
     use_col, type_col, nbhd_col = first_col(out, "use_code"), first_col(out, "type"), first_col(out, "neighborhood")
     if not price_col or not land_cols or not total_cols:
         raise ValueError("Ratio Checker requires Sale Price, Land Value, and Total Value.")
-    price, land, imp, misc, total = numeric(out[price_col]), sum_columns(out, land_cols), sum_columns(out, imp_cols), sum_columns(out, misc_cols), sum_columns(out, total_cols)
+
+    price = numeric(out[price_col])
+    land = sum_columns(out, land_cols)
+    imp = sum_columns(out, imp_cols)
+    misc = sum_columns(out, misc_cols)
+    total = sum_columns(out, total_cols)
+
     types, ratios, qstatuses = [], [], []
     for p, idx in enumerate(out.index):
         qual, _ = classify_row_qualification(out, idx)
@@ -601,22 +709,35 @@ def ratio_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
         if existing not in {"L", "B", "L&B"}:
             existing = _default_type(normalize_code(out.at[idx, use_col])) if use_col else ""
         types.append(existing)
+
         r = np.nan
         if qual == "GOOD" and price.iloc[p] > 0:
-            if existing == "L": r = land.iloc[p] / price.iloc[p]
-            elif existing == "B": r = (imp.iloc[p] + misc.iloc[p]) / price.iloc[p]
-            elif existing == "L&B": r = total.iloc[p] / price.iloc[p]
+            if existing == "L":
+                r = land.iloc[p] / price.iloc[p]
+            elif existing == "B":
+                r = (imp.iloc[p] + misc.iloc[p]) / price.iloc[p]
+            elif existing == "L&B":
+                r = total.iloc[p] / price.iloc[p]
         ratios.append(r)
+
     out[TYPE_COL] = types
     out[RATIO_COL] = ratios
 
-    # Neighborhood quartiles based on valid good-sale ratios.
-    q1q3: Dict[str, Tuple[float, float]] = {}
+    # Neighborhood thresholds are computed per neighborhood. The default
+    # preserves the current code behavior: Q1 (25th percentile) / Q3 (75th).
+    neighborhood_bounds: Dict[str, Tuple[float, float]] = {}
     if nbhd_col:
-        temp = pd.DataFrame({"nbhd": out[nbhd_col].map(clean_text), "ratio": ratios, "qual": qstatuses})
-        for nbhd, grp in temp[(temp["qual"] == "GOOD") & pd.to_numeric(temp["ratio"], errors="coerce").notna()].groupby("nbhd"):
-            vals = pd.to_numeric(grp["ratio"], errors="coerce").dropna()
-            if len(vals): q1q3[nbhd] = (float(vals.quantile(.25)), float(vals.quantile(.75)))
+        temp = pd.DataFrame(
+            {"nbhd": out[nbhd_col].map(clean_text), "ratio": ratios, "qual": qstatuses}
+        )
+        valid_temp = temp[
+            (temp["qual"] == "GOOD")
+            & pd.to_numeric(temp["ratio"], errors="coerce").notna()
+        ]
+        for nbhd, grp in valid_temp.groupby("nbhd"):
+            low_bound, high_bound = _neighborhood_bounds(grp["ratio"], thresholds)
+            if np.isfinite(low_bound) and np.isfinite(high_bound):
+                neighborhood_bounds[nbhd] = (low_bound, high_bound)
 
     flags, neighborhood_checks = [], []
     for p, idx in enumerate(out.index):
@@ -626,23 +747,35 @@ def ratio_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
             flags.append("N/A - Sale Not Included / Ratio Unavailable")
             neighborhood_checks.append("N/A")
             continue
-        if r < GLOBAL_TOO_LOW: global_status = "Too Low for Global"
-        elif GLOBAL_PERFECT_LOW <= r <= GLOBAL_PERFECT_HIGH: global_status = "Perfect Global"
-        elif r > GLOBAL_TOO_HIGH: global_status = "Too High for Global"
-        else: global_status = "Acceptable Global"
+
+        if r < thresholds["global_too_low"]:
+            global_status = "Too Low for Global"
+        elif thresholds["global_perfect_low"] <= r <= thresholds["global_perfect_high"]:
+            global_status = "Perfect Global"
+        elif r > thresholds["global_too_high"]:
+            global_status = "Too High for Global"
+        else:
+            global_status = "Acceptable Global"
+
         nstatus = "N/A"
         if nbhd_col:
             nbhd = clean_text(out.at[idx, nbhd_col])
-            if nbhd in q1q3:
-                q1, q3 = q1q3[nbhd]
-                if r < q1: nstatus = "Too Low"
-                elif r > q3: nstatus = "Too High"
-                else: nstatus = "Acceptable"
+            if nbhd in neighborhood_bounds:
+                low_bound, high_bound = neighborhood_bounds[nbhd]
+                if r < low_bound:
+                    nstatus = "Too Low"
+                elif r > high_bound:
+                    nstatus = "Too High"
+                else:
+                    nstatus = "Acceptable"
+
         neighborhood_checks.append(nstatus)
         flags.append(f"{global_status}; Neighborhood: {nstatus}")
+
     out[STATUS_COL] = flags
     out[NEIGHBORHOOD_CHECK_COL] = neighborhood_checks
     valid = pd.to_numeric(out[RATIO_COL], errors="coerce").dropna()
+
     summary = {
         "checker": "Ratio Checker",
         "total_rows": len(out),
@@ -652,13 +785,23 @@ def ratio_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
         "too_low_global": int(out[STATUS_COL].astype(str).str.contains("Too Low for Global", regex=False).sum()),
         "too_high_global": int(out[STATUS_COL].astype(str).str.contains("Too High for Global", regex=False).sum()),
         "perfect_global": int(out[STATUS_COL].astype(str).str.contains("Perfect Global", regex=False).sum()),
+        "global_too_low_ratio": float(thresholds["global_too_low"]),
+        "global_perfect_range": (
+            f"{float(thresholds['global_perfect_low']):.4f}–"
+            f"{float(thresholds['global_perfect_high']):.4f}"
+        ),
+        "global_too_high_ratio": float(thresholds["global_too_high"]),
+        "neighborhood_threshold_method": _neighborhood_method_label(thresholds),
     }
     return out, summary
 
 
-
-def neighborhood_ratio_statistics(df: pd.DataFrame) -> pd.DataFrame:
+def neighborhood_ratio_statistics(
+    df: pd.DataFrame,
+    threshold_settings: Optional[Dict[str, object]] = None,
+) -> pd.DataFrame:
     """Build a neighborhood-level diagnostic table from the current ratio results."""
+    thresholds = resolve_ratio_thresholds(threshold_settings)
     nbhd_col = first_col(df, "neighborhood")
     ratio_col = first_col(df, "ratio")
     if not nbhd_col or not ratio_col:
@@ -683,30 +826,46 @@ def neighborhood_ratio_statistics(df: pd.DataFrame) -> pd.DataFrame:
         vals = grp["Sales Ratio"].dropna()
         if vals.empty:
             continue
+
         q1 = float(vals.quantile(.25))
         q3 = float(vals.quantile(.75))
-        ncheck = grp["Neighborhood Check"].astype(str)
+        low_bound, high_bound = _neighborhood_bounds(vals, thresholds)
         flags = grp["Flag Status"].astype(str)
+
         rows.append({
             "Neighborhood": nbhd,
             "Valid Sales": int(vals.count()),
+            "Threshold Method": _neighborhood_method_label(thresholds),
+            "Neighborhood Low Threshold": low_bound,
+            "Neighborhood High Threshold": high_bound,
             "Q1": q1,
             "Median": float(vals.median()),
             "Q3": q3,
             "Mean": float(vals.mean()),
             "Minimum": float(vals.min()),
             "Maximum": float(vals.max()),
-            "Neighborhood Low": int((vals < q1).sum()),
-            "Neighborhood High": int((vals > q3).sum()),
-            "Global Low": int((vals < GLOBAL_TOO_LOW).sum()),
-            "Global High": int((vals > GLOBAL_TOO_HIGH).sum()),
-            "Critical Dual Outliers": int(flags.str.contains("Global and Neighborhood Ratio Outlier", case=False, regex=False).sum()),
+            "Neighborhood Low": int((vals < low_bound).sum()),
+            "Neighborhood High": int((vals > high_bound).sum()),
+            "Global Low": int((vals < float(thresholds["global_too_low"])).sum()),
+            "Global High": int((vals > float(thresholds["global_too_high"])).sum()),
+            "Critical Dual Outliers": int(
+                flags.str.contains(
+                    "Global and Neighborhood Ratio Outlier",
+                    case=False,
+                    regex=False,
+                ).sum()
+            ),
         })
     return pd.DataFrame(rows)
 
-def quality_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
+
+def quality_checker(
+    df: pd.DataFrame,
+    threshold_settings: Optional[Dict[str, object]] = None,
+) -> Tuple[pd.DataFrame, Dict[str, object]]:
     # Start from type-aware ratio results, then apply the broader integrity audit hierarchy.
-    ratio_df, ratio_summary = ratio_checker(df)
+    thresholds = resolve_ratio_thresholds(threshold_settings)
+    ratio_df, ratio_summary = ratio_checker(df, thresholds)
     out = ratio_df.copy()
     parcel_col, nbhd_col, use_col = first_col(out, "parcel"), first_col(out, "neighborhood"), first_col(out, "use_code")
     price_col = first_col(out, "sale_price")
@@ -716,14 +875,17 @@ def quality_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
     land_cols, imp_cols, misc_cols, total_cols = columns_for(out, "land_value"), columns_for(out, "improvement_value"), columns_for(out, "misc_value"), columns_for(out, "total_value")
     land, imp, misc, total = sum_columns(out, land_cols), sum_columns(out, imp_cols), sum_columns(out, misc_cols), sum_columns(out, total_cols)
 
-    # Calculate ratio quartiles for dual-outlier logic.
+    # Calculate the configured neighborhood bounds for dual-outlier logic.
     valid_ratios = pd.to_numeric(out[RATIO_COL], errors="coerce")
-    q1q3 = {}
+    neighborhood_bounds = {}
     if nbhd_col:
         temp = pd.DataFrame({"nbhd": out[nbhd_col].map(clean_text), "ratio": valid_ratios})
         for nbhd, grp in temp.groupby("nbhd"):
             vals = grp["ratio"].dropna()
-            if len(vals): q1q3[nbhd] = (float(vals.quantile(.25)), float(vals.quantile(.75)))
+            if len(vals):
+                low_bound, high_bound = _neighborhood_bounds(vals, thresholds)
+                if np.isfinite(low_bound) and np.isfinite(high_bound):
+                    neighborhood_bounds[nbhd] = (low_bound, high_bound)
 
     statuses = []
     counts: Dict[str, int] = {}
@@ -786,11 +948,14 @@ def quality_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
         if not status and qual == "BAD":
             status = "Bad Sale with Comment - Review"; bump("bad_sale_with_comment")
         if not status and np.isfinite(ratio):
-            global_outlier = ratio < GLOBAL_TOO_LOW or ratio > GLOBAL_TOO_HIGH
+            global_outlier = (
+                ratio < float(thresholds["global_too_low"])
+                or ratio > float(thresholds["global_too_high"])
+            )
             neighborhood_outlier = False
-            if nbhd in q1q3:
-                q1, q3 = q1q3[nbhd]
-                neighborhood_outlier = ratio < q1 or ratio > q3
+            if nbhd in neighborhood_bounds:
+                low_bound, high_bound = neighborhood_bounds[nbhd]
+                neighborhood_outlier = ratio < low_bound or ratio > high_bound
             if global_outlier and neighborhood_outlier:
                 status = "Critical: Global and Neighborhood Ratio Outlier"; bump("dual_outlier")
             elif global_outlier:
@@ -805,6 +970,13 @@ def quality_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
     summary = {"checker": "Quality Checker", "total_rows": len(out), **counts}
     summary["issues_requiring_review"] = len(out) - counts.get("compliant", 0)
     summary["valid_ratios"] = ratio_summary.get("valid_ratios", 0)
+    summary["global_too_low_ratio"] = float(thresholds["global_too_low"])
+    summary["global_perfect_range"] = (
+        f"{float(thresholds['global_perfect_low']):.4f}–"
+        f"{float(thresholds['global_perfect_high']):.4f}"
+    )
+    summary["global_too_high_ratio"] = float(thresholds["global_too_high"])
+    summary["neighborhood_threshold_method"] = _neighborhood_method_label(thresholds)
     return out, summary
 
 
