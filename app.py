@@ -185,7 +185,7 @@ After a checker runs, review the **Dashboard** first, then the record-level **An
 - **Missing** means a needed field is blank or unavailable; verify the field mapping first, then the source record.
 - **Calculated** means the app derived a value from mapped fields rather than relying on a supplied source value.
 - **VERIFY PASS** is an overall Generate Statistics screening result based on the current overall median and COD limits. It is **not** a blanket approval of every neighborhood or sale. Review neighborhood/valuation-zone sample sizes and statistics before relying on it.
-- Use **Download Processed Workbook** when the review is complete. The export carries the generated statuses/results for continued work in Excel.
+- Use **Download Processed Workbook** when the review is complete. In the Excel export, only rows that require attention receive row-wide issue shading; the specific source cell(s) most directly tied to the issue receive a stronger contrasting highlight. **Flag Status** is preserved, including the normal good/verified status text and color, so compliant rows are not mistaken for issues.
 
 ### Help and Review Tips
 The **📘 Help** control remains in the **left sidebar**. It is a quick-reference aid; the full user guide is the **Instructions / User Guide** panel at the top of the main page.
@@ -231,7 +231,7 @@ The full **📘 Instructions / User Guide** is at the top of the main page.
 
 **Export / Download Processed Workbook**
 
-Use **Download Processed Workbook** after reviewing the results. The exported Excel workbook keeps the original working data together with the generated checker statuses, flags, reasons, calculated fields, and other analysis output available from the current run. This lets you continue reviewing, documenting, filtering, or sharing the results outside the web application without recreating the analysis manually.
+Use **Download Processed Workbook** after reviewing the results. The exported Excel workbook keeps the original working data together with the generated checker statuses, flags, reasons, calculated fields, and other analysis output available from the current run. **Only rows with issues are shaded across the row**, and the **specific cell(s) most directly associated with the issue are highlighted in a stronger contrasting color** for easier identification. The **Flag Status** remains in place and keeps its normal status color, including good/verified statuses. This lets you continue reviewing, documenting, filtering, or sharing the results outside the web application without recreating the analysis manually.
 """
 
 
@@ -241,6 +241,7 @@ def render_user_instructions():
 
 
 st.title("📊 Sales Ratio Quality Checker")
+st.caption("Browser-based version of the Excel/VBA Sales Ratio Quality Checker workflow")
 
 with st.expander("📘 Instructions / User Guide — Click to Open", expanded=False):
     render_user_instructions()
