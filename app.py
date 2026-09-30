@@ -68,7 +68,7 @@ Use this guide with the live application to move from upload and field mapping t
 ---
 
 ### 1. Quick Start
-**Recommended workflow:** Upload → Verify Mapping → Apply Mapping → Prepare Data → Review Thresholds When Appropriate → Run Checker → Review Dashboard / Neighborhoods / Rows → Generate Statistics if needed → Export
+**Recommended workflow:** Upload → Verify Mapping → Apply Mapping → Prepare Data → Review Thresholds → Run Checker → Review Dashboard / Neighborhoods / Rows → Generate Statistics if needed → Export
 
 1. Upload the CAMA / sales-ratio workbook from **1 · Load data** in the left sidebar.
 2. Open **2 · Field Mapping Review** and verify every proposed source field.
@@ -170,13 +170,23 @@ The table can show, by neighborhood:
 ### 6. Checker Reference
 | Tool | Main review focus | Key note |
 |---|---|---|
-| **Sale Date Checker** | Missing/out-of-range dates | Tax Year of Study controls the study period. |
+| **Sale Date Checker** | Missing/out-of-range dates | Set/confirm **Tax Year of Study** before clicking the checker; the selected tax year controls the study period. |
 | **Use Code Checker** | Use Code/property-component issues | Review code and land/improvement conditions together. |
 | **Appraisal Value Checker** | Component-to-total reconciliation | Land + improvement + miscellaneous vs. total. |
 | **Deed / MH / Comment Audit** | Transaction/documentation issues | Parties, deed, qualification, comments, MH, duplicates, bad-sale documentation. |
 | **Ratio Checker** | Ratio classifications | L, B, L&B plus Global and Neighborhood status. |
 | **Quality Checker** | Consolidated screening | Flag Status and detailed reason; includes critical dual ratio outliers. |
 | **Generate Statistics** | Study summaries | Overall, Use Code, and valuation-zone/neighborhood statistics. |
+
+#### Sale Date Checker — set the Tax Year first
+When using the **Sale Date Checker**, set or confirm the tax year **before** clicking the checker button:
+
+1. Under **3 · Tool Menu**, expand **Sale Date Checker setting**.
+2. Enter or confirm the **Tax Year of Study**.
+3. Review the study-period message shown beneath the setting to make sure it is the period you intend to test.
+4. Then click **📅 Sale Date Checker**.
+
+> **Important:** Always set/confirm the **Tax Year of Study first**, then run **Sale Date Checker**. The selected tax year determines which sale-date study period the checker uses.
 
 **Sale Date study period:** October 1 of **Tax Year − 2** through September 30 of **Tax Year − 1**.
 
