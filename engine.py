@@ -656,6 +656,54 @@ def ratio_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
     return out, summary
 
 
+
+def neighborhood_ratio_statistics(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a neighborhood-level diagnostic table from the current ratio results."""
+    nbhd_col = first_col(df, "neighborhood")
+    ratio_col = first_col(df, "ratio")
+    if not nbhd_col or not ratio_col:
+        return pd.DataFrame()
+
+    work = pd.DataFrame({
+        "Neighborhood": df[nbhd_col].map(clean_text),
+        "Sales Ratio": pd.to_numeric(df[ratio_col], errors="coerce"),
+    })
+    if NEIGHBORHOOD_CHECK_COL in df.columns:
+        work["Neighborhood Check"] = df[NEIGHBORHOOD_CHECK_COL].astype(str)
+    else:
+        work["Neighborhood Check"] = ""
+    if STATUS_COL in df.columns:
+        work["Flag Status"] = df[STATUS_COL].astype(str)
+    else:
+        work["Flag Status"] = ""
+
+    work = work[(work["Neighborhood"] != "") & work["Sales Ratio"].notna()].copy()
+    rows = []
+    for nbhd, grp in work.groupby("Neighborhood", sort=True):
+        vals = grp["Sales Ratio"].dropna()
+        if vals.empty:
+            continue
+        q1 = float(vals.quantile(.25))
+        q3 = float(vals.quantile(.75))
+        ncheck = grp["Neighborhood Check"].astype(str)
+        flags = grp["Flag Status"].astype(str)
+        rows.append({
+            "Neighborhood": nbhd,
+            "Valid Sales": int(vals.count()),
+            "Q1": q1,
+            "Median": float(vals.median()),
+            "Q3": q3,
+            "Mean": float(vals.mean()),
+            "Minimum": float(vals.min()),
+            "Maximum": float(vals.max()),
+            "Neighborhood Low": int((vals < q1).sum()),
+            "Neighborhood High": int((vals > q3).sum()),
+            "Global Low": int((vals < GLOBAL_TOO_LOW).sum()),
+            "Global High": int((vals > GLOBAL_TOO_HIGH).sum()),
+            "Critical Dual Outliers": int(flags.str.contains("Global and Neighborhood Ratio Outlier", case=False, regex=False).sum()),
+        })
+    return pd.DataFrame(rows)
+
 def quality_checker(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, object]]:
     # Start from type-aware ratio results, then apply the broader integrity audit hierarchy.
     ratio_df, ratio_summary = ratio_checker(df)
