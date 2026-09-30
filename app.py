@@ -68,7 +68,7 @@ Use this guide with the live application to move from upload and field mapping t
 ---
 
 ### 1. Quick Start
-**Recommended workflow:** Upload → Verify Mapping → Apply Mapping → Prepare Data → Review Thresholds → Run Checker → Review Dashboard / Neighborhoods / Rows → Generate Statistics if needed → Export
+**Recommended workflow:** Upload → Verify Mapping → Apply Mapping → Prepare Data → Review Thresholds When Appropriate → Run Checker → Review Dashboard / Neighborhoods / Rows → Generate Statistics if needed → Export
 
 1. Upload the CAMA / sales-ratio workbook from **1 · Load data** in the left sidebar.
 2. Open **2 · Field Mapping Review** and verify every proposed source field.
