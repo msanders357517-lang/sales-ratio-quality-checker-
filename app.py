@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 
@@ -41,36 +40,154 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def load_readme_instructions() -> str:
-    """
-    Load README.md from the deployed application directory.
+APP_INSTRUCTIONS = """
+## 📘 Sales Ratio Quality Checker — In-App User Guide
 
-    README.md is the single source of truth for the in-app user guide.
-    """
-    candidates = [
-        Path(__file__).resolve().with_name("README.md"),
-        Path.cwd() / "README.md",
-    ]
-    for readme_path in candidates:
-        if readme_path.exists():
-            try:
-                return readme_path.read_text(encoding="utf-8")
-            except Exception as exc:
-                return f"### Instructions unavailable\n\nCould not read `README.md`: {exc}"
-    return (
-        "### Instructions unavailable\n\n"
-        "`README.md` was not found beside `app.py`. "
-        "Add `README.md` to the same GitHub repository and redeploy the app."
-    )
+These instructions are built directly into the application and are the user guide for the live program. The **Help** control remains in the left sidebar for quick reminders, while the full instructions stay here at the top of the main page.
+
+### Contents
+- [Quick Start](#quick-start)
+- [Upload and Field Mapping](#upload-and-field-mapping)
+- [Prepare Data and Tool Menu](#prepare-data-and-tool-menu)
+- [Ratio Threshold Settings](#ratio-threshold-settings)
+- [Neighborhood Statistics](#neighborhood-statistics)
+- [Checker Reference](#checker-reference)
+- [Dashboard, Results, and Export](#dashboard-results-and-export)
+- [Help and Review Tips](#help-and-review-tips)
+
+### Quick Start
+1. Upload the CAMA / sales-ratio workbook from **1 · Load data** in the left sidebar.
+2. Review the detected vendor and open **2 · Field Mapping Review**.
+3. Verify each proposed source column. If more than one field could qualify, choose the field that should be authoritative for the analysis.
+4. Click **Apply Field Mapping**.
+5. Click **Prepare Data** and confirm the top summary shows **Prepared = Yes**.
+6. For ratio-based work, review **Ratio Threshold Settings** before running **Ratio Checker** or **Quality Checker**.
+7. Run the desired checker from **3 · Tool Menu**.
+8. Review **4 · Dashboard**, expand **🏘️ Neighborhood Statistics** when it is available, and review **5 · Analysis Results**.
+9. Turn on **Show only rows requiring review** to focus on exceptions.
+10. Use **6 · Export** to download the processed workbook.
+
+### Upload and Field Mapping
+The app looks for an **Analysis** worksheet first and otherwise uses the first worksheet in the uploaded Excel file. Supported upload types are `.xlsx`, `.xlsm`, `.xls`, and `.xlsb`.
+
+**Field Mapping Review** connects vendor-specific source columns to the standardized fields used by the checker engine.
+
+- Open **Review / Change Field Mapping** with its arrow.
+- Review every proposed field before relying on checker output.
+- If more than one source field is a reasonable match, select the source column you want the checker to use.
+- Click **Apply Field Mapping** after making changes.
+- Expand **Mapping Details** when you want to verify the detected header, standardized field, populated-row count, candidate headers, or mapping method.
+- For Delta files, **USE CODE** remains the authoritative Use Code unless you explicitly choose another field.
+- Four-digit Use Codes are normalized by removing one outside zero when applicable: `0100 → 100`, `1000 → 100`, `0101 → 101`, `1010 → 101`; `1001` remains `1001`.
+
+### Prepare Data and Tool Menu
+**Prepare Data** creates the clean, standardized working dataset used by the analytical tools. Run it after applying field mapping and whenever you upload a new workbook or materially change the mapping.
+
+The Tool Menu contains **Prepare Data**, **Sale Date Checker**, **Use Code Checker**, **Appraisal Value Checker**, **Deed / MH / Comment Audit**, **Ratio Checker**, **Quality Checker**, **Generate Statistics**, and **Clear Results**.
+
+**Clear Results** removes prior generated checker output while keeping the uploaded workbook available, so you can start another analysis without re-uploading the file.
+
+### Ratio Threshold Settings
+The ratio controls are located between **Field Mapping Review** and the **Tool Menu**. The current code defaults load automatically, but you may change them when the study requires different limits.
+
+#### Overall / Global
+**Global** means the ratio is compared with one set of limits for the overall applicable sales population, regardless of neighborhood.
+
+- **Too Low below**: ratios below this value are **Too Low for Global**. Current default: `0.5000`.
+- **Perfect Global minimum / maximum**: ratios inside this range are **Perfect Global**. Current defaults: `0.7000–1.2000`.
+- Ratios between the Too Low boundary and Perfect range, or between the Perfect range and Too High boundary, are **Acceptable Global**.
+- **Too High above**: ratios above this value are **Too High for Global**. Current default: `1.5000`.
+
+The four Global settings must remain in this order:
+`Too Low ≤ Perfect Minimum ≤ Perfect Maximum ≤ Too High`.
+
+#### Neighborhood
+Neighborhood analysis compares a sale with the other usable ratios in the **same neighborhood**. A record can therefore be acceptable globally but unusual for its neighborhood, or the reverse.
+
+Choose one neighborhood method:
+
+- **Percentile / Quartile Limits** — the current default. The default lower boundary is the **25th percentile (Q1)** and the upper boundary is the **75th percentile (Q3)** for each neighborhood. Below the lower boundary = **Neighborhood Too Low**; above the upper boundary = **Neighborhood Too High**; between them = **Acceptable**.
+- **Fixed Ratio Limits** — uses the same neighborhood low/high cutoffs for every neighborhood instead of calculating separate percentile limits.
+
+After changing any Global or Neighborhood setting, click **Apply Threshold Settings**, then rerun **Ratio Checker** or **Quality Checker** so the statuses, Dashboard, and Neighborhood Statistics are recalculated. **Reset to Current Code Defaults** restores the original settings.
+
+**Critical dual outlier:** this is not a separate threshold you set. In the Quality Checker, a record is treated as **Critical: Global and Neighborhood Ratio Outlier** when the same ratio is outside both its Global limit and its Neighborhood limit.
+
+### Neighborhood Statistics
+After **Ratio Checker** or **Quality Checker** runs, the app automatically creates a **🏘️ Neighborhood Statistics** panel under the Dashboard when neighborhood and ratio data are available. Click its arrow to expand it; the panel stays collapsed by default because the table can be large.
+
+The table can show, by neighborhood:
+- valid sale count;
+- threshold method and the neighborhood low/high thresholds;
+- Q1, Median, Q3, Mean, Minimum, and Maximum ratio;
+- Neighborhood Low and Neighborhood High counts;
+- Global Low and Global High counts; and
+- **Critical Dual Outliers** — records that are outliers under both tests.
+
+Use this table together with the row-level result. A neighborhood or global flag means the record needs review; it does not automatically mean the assessment or sale is wrong.
+
+### Checker Reference
+| Tool | Purpose | Main review focus |
+|---|---|---|
+| **Prepare Data** | Standardize and clean working data | Prepared status and mapped fields |
+| **Sale Date Checker** | Validate the study-period dates | Missing or out-of-range sale dates |
+| **Use Code Checker** | Review Use Code/property-component conditions | Missing/unsupported codes and land/improvement conflicts |
+| **Appraisal Value Checker** | Crossfoot component values to total value | Land + improvement + miscellaneous vs. total |
+| **Deed / MH / Comment Audit** | Review transaction/documentation conditions | Parties, deeds, comments, qualification, MH, duplicates, and bad-sale conditions |
+| **Ratio Checker** | Calculate and evaluate L, B, and L&B ratios | Global and neighborhood ratio classifications |
+| **Quality Checker** | Consolidated integrity screening | Flag Status/reasons, including critical dual ratio outliers |
+| **Generate Statistics** | Create statistical summaries | Current prepared/analysis population |
+| **Clear Results** | Reset prior checker output | Begin another analysis without re-uploading |
+
+**Sale Date Checker setting:** select the Tax Year of Study. The app checks the period from **October 1 of Tax Year − 2 through September 30 of Tax Year − 1**.
+
+**Ratio formulas:** `L = Land Value ÷ Sale Price`; `B = (Improvement Value + Miscellaneous Value) ÷ Sale Price`; `L&B = Total Value ÷ Sale Price`.
+
+**Bad Sale with No Comment:** the audit and Quality Checker treat this as its own review condition. A bad sale does not need to already have a comment in order to be flagged for missing documentation.
+
+### Dashboard, Results, and Export
+After a checker runs, review the **Dashboard** first, then the record-level **Analysis Results**.
+
+- Use **Show only rows requiring review** to filter out records that appear verified/perfect and concentrate on exceptions.
+- A completion message means the tool finished running; it does **not** mean every record passed.
+- **OK / acceptable** means no configured exception was identified for that check.
+- **Review / flagged** means one or more conditions require analyst attention.
+- **Missing** means a needed field is blank or unavailable; verify the field mapping first, then the source record.
+- **Calculated** means the app derived a value from mapped fields rather than relying on a supplied source value.
+- Use **Download Processed Workbook** when the review is complete. The export carries the generated statuses/results for continued work in Excel.
+
+### Help and Review Tips
+The **📘 Help** control remains in the **left sidebar**. It is a quick-reference aid; the full user guide is the **Instructions / User Guide** panel at the top of the main page.
+
+Recommended review practices:
+- Verify field mapping before trusting any analytical result.
+- Confirm **Prepared = Yes** before analytical checkers.
+- Review Global and Neighborhood settings before ratio-based analysis.
+- Rerun the Ratio or Quality Checker after changing thresholds.
+- Use Global and Neighborhood results together instead of treating either one as the only standard.
+- Use Neighborhood Statistics to understand local context before correcting a flagged ratio.
+- Treat flags as prompts for analyst review, not automatic proof of an error.
+"""
+
+SIDEBAR_HELP = """
+**Quick Help**
+
+The full **📘 Instructions / User Guide** is at the top of the main page.
+
+- **Mapping:** verify the source fields, then click **Apply Field Mapping**.
+- **Prepare:** run **Prepare Data** and confirm **Prepared = Yes**.
+- **Ratio / Quality:** review **Ratio Threshold Settings** first.
+- **Global:** compares the ratio with overall study limits.
+- **Neighborhood:** compares the ratio with same-neighborhood limits.
+- **Critical dual outlier:** the same record is outside both Global and Neighborhood limits.
+- **Neighborhood Statistics:** appears under the Dashboard after Ratio or Quality analysis when data are available.
+- **Clear Results:** clears checker output without removing the uploaded workbook.
+"""
 
 
 def render_user_instructions():
-    """Render the repository README directly inside the app."""
-    st.caption(
-        "This guide is loaded directly from README.md. "
-        "Update README.md in GitHub and the in-app guide updates after deployment."
-    )
-    st.markdown(load_readme_instructions(), unsafe_allow_html=False)
+    """Render the user-facing guide maintained directly in this application."""
+    st.markdown(APP_INSTRUCTIONS, unsafe_allow_html=False)
 
 
 st.title("📊 Sales Ratio Quality Checker")
@@ -93,9 +210,8 @@ if "ratio_thresholds" not in st.session_state:
 
 with st.sidebar:
     st.subheader("📘 Help")
-    with st.popover("Open Instructions / User Guide", use_container_width=True):
-        render_user_instructions()
-    st.caption("Instructions are loaded directly from README.md.")
+    with st.popover("Help / Quick Reference", use_container_width=True):
+        st.markdown(SIDEBAR_HELP)
 
     st.divider()
     st.header("1 · Load data")
@@ -159,7 +275,7 @@ if st.session_state.df is None:
     st.info("Upload an Excel workbook to begin. The app looks for an **Analysis** sheet first and uses the first worksheet when Analysis is not present.")
     st.markdown("### Online workflow")
     st.write("Upload → Review / Apply Field Mapping → Prepare Data → choose a checker → review flagged records and dashboard → generate statistics if needed → download processed Excel.")
-    st.caption("Need help? Click **📘 Instructions / User Guide — Click to Open** under the app title, or use **📘 Help** in the sidebar. Both load directly from README.md.")
+    st.caption("Need help? Open **📘 Instructions / User Guide — Click to Open** at the top of the main page. The **📘 Help** control in the sidebar provides a quick reference.")
     st.stop()
 
 # Header/status area
