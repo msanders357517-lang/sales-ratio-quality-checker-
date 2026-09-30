@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 
@@ -8,6 +9,7 @@ from mapping_layer import canonicalize, mapping_options, DERIVED_RATIO_OPTION, D
 
 from engine import (
     STATUS_COL,
+    DEFAULT_RATIO_THRESHOLDS,
     appraisal_value_checker,
     deed_audit_checker,
     export_results_xlsx,
@@ -28,11 +30,55 @@ st.markdown("""
 .block-container {padding-top: 1.4rem; padding-bottom: 3rem;}
 .tool-card {border:1px solid #d9e2ec;border-radius:14px;padding:14px 16px;background:#f8fbfe;margin-bottom:8px;}
 .small-note {color:#64748b;font-size:.9rem;}
+.help-callout {
+    border: 1px solid #cbd5e1;
+    border-left: 5px solid #2563eb;
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+    background: #f8fafc;
+    margin: 0.25rem 0 0.75rem 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
+def load_readme_instructions() -> str:
+    """
+    Load README.md from the deployed application directory.
+
+    README.md is the single source of truth for the in-app user guide.
+    """
+    candidates = [
+        Path(__file__).resolve().with_name("README.md"),
+        Path.cwd() / "README.md",
+    ]
+    for readme_path in candidates:
+        if readme_path.exists():
+            try:
+                return readme_path.read_text(encoding="utf-8")
+            except Exception as exc:
+                return f"### Instructions unavailable\n\nCould not read `README.md`: {exc}"
+    return (
+        "### Instructions unavailable\n\n"
+        "`README.md` was not found beside `app.py`. "
+        "Add `README.md` to the same GitHub repository and redeploy the app."
+    )
+
+
+def render_user_instructions():
+    """Render the repository README directly inside the app."""
+    st.caption(
+        "This guide is loaded directly from README.md. "
+        "Update README.md in GitHub and the in-app guide updates after deployment."
+    )
+    st.markdown(load_readme_instructions(), unsafe_allow_html=False)
+
+
 st.title("📊 Sales Ratio Quality Checker")
 st.caption("Browser-based version of the Excel/VBA Sales Ratio Quality Checker workflow")
+
+with st.expander("📘 Instructions / User Guide — Click to Open", expanded=False):
+    render_user_instructions()
+
 
 for key, default in {
     "df": None, "original_df": None, "raw_df": None, "source_name": None, "last_summary": {},
@@ -42,7 +88,16 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
+if "ratio_thresholds" not in st.session_state:
+    st.session_state.ratio_thresholds = DEFAULT_RATIO_THRESHOLDS.copy()
+
 with st.sidebar:
+    st.subheader("📘 Help")
+    with st.popover("Open Instructions / User Guide", use_container_width=True):
+        render_user_instructions()
+    st.caption("Instructions are loaded directly from README.md.")
+
+    st.divider()
     st.header("1 · Load data")
     upload = st.file_uploader("Upload a CAMA / sales-ratio workbook", type=["xlsx", "xlsm", "xls", "xlsb"])
     if upload is not None:
@@ -84,6 +139,14 @@ with st.sidebar:
                 st.session_state[k] = {}
             else:
                 st.session_state[k] = False
+        st.session_state.ratio_thresholds = DEFAULT_RATIO_THRESHOLDS.copy()
+        for widget_key in [
+            "thr_global_too_low", "thr_global_perfect_low", "thr_global_perfect_high",
+            "thr_global_too_high", "thr_neighborhood_method",
+            "thr_neighborhood_lower_percentile", "thr_neighborhood_upper_percentile",
+            "thr_neighborhood_fixed_low", "thr_neighborhood_fixed_high",
+        ]:
+            st.session_state.pop(widget_key, None)
         st.rerun()
     if st.session_state.df is not None and st.button("↩️ Restore Uploaded Data", use_container_width=True):
         st.session_state.df = st.session_state.original_df.copy()
@@ -95,7 +158,8 @@ with st.sidebar:
 if st.session_state.df is None:
     st.info("Upload an Excel workbook to begin. The app looks for an **Analysis** sheet first and uses the first worksheet when Analysis is not present.")
     st.markdown("### Online workflow")
-    st.write("Upload → Prepare Data → choose a checker → review flagged records and dashboard → download processed Excel → run another checker or Clear All.")
+    st.write("Upload → Review / Apply Field Mapping → Prepare Data → choose a checker → review flagged records and dashboard → generate statistics if needed → download processed Excel.")
+    st.caption("Need help? Click **📘 Instructions / User Guide — Click to Open** under the app title, or use **📘 Help** in the sidebar. Both load directly from README.md.")
     st.stop()
 
 # Header/status area
@@ -168,6 +232,221 @@ with st.expander("▶ Review / Change Field Mapping", expanded=False):
         with st.expander("🔎 Mapping Details", expanded=False):
             st.dataframe(st.session_state.mapping_report, use_container_width=True, hide_index=True)
 
+# Ratio threshold controls. Defaults mirror the original/current code behavior.
+thresholds = st.session_state.ratio_thresholds
+if thresholds.get("neighborhood_method") == "fixed":
+    neighborhood_summary = (
+        f"Fixed {float(thresholds['neighborhood_fixed_low']):.3f}–"
+        f"{float(thresholds['neighborhood_fixed_high']):.3f}"
+    )
+else:
+    neighborhood_summary = (
+        f"P{float(thresholds['neighborhood_lower_percentile']):g}–"
+        f"P{float(thresholds['neighborhood_upper_percentile']):g} "
+        "(current code default = Q1–Q3)"
+    )
+
+st.markdown("### ⚙️ Ratio Threshold Settings")
+st.caption(
+    f"Applied now: Overall Too Low < {float(thresholds['global_too_low']):.3f} · "
+    f"Perfect Global {float(thresholds['global_perfect_low']):.3f}–"
+    f"{float(thresholds['global_perfect_high']):.3f} · "
+    f"Overall Too High > {float(thresholds['global_too_high']):.3f} · "
+    f"Neighborhood {neighborhood_summary}"
+)
+
+with st.expander("⚙️ Change Overall / Global and Neighborhood Thresholds", expanded=False):
+    st.info(
+        "The fields are automatically pre-set to the current checker requirements. "
+        "Change them only when your study requires different limits, then click Apply."
+    )
+
+    st.markdown("#### Overall / Global")
+    g1, g2, g3, g4 = st.columns(4)
+    global_too_low = g1.number_input(
+        "Too Low below",
+        min_value=0.0,
+        value=float(thresholds["global_too_low"]),
+        step=0.01,
+        format="%.4f",
+        key="thr_global_too_low",
+        help="Ratios below this value are Too Low for Global.",
+    )
+    global_perfect_low = g2.number_input(
+        "Perfect Global minimum",
+        min_value=0.0,
+        value=float(thresholds["global_perfect_low"]),
+        step=0.01,
+        format="%.4f",
+        key="thr_global_perfect_low",
+    )
+    global_perfect_high = g3.number_input(
+        "Perfect Global maximum",
+        min_value=0.0,
+        value=float(thresholds["global_perfect_high"]),
+        step=0.01,
+        format="%.4f",
+        key="thr_global_perfect_high",
+    )
+    global_too_high = g4.number_input(
+        "Too High above",
+        min_value=0.0,
+        value=float(thresholds["global_too_high"]),
+        step=0.01,
+        format="%.4f",
+        key="thr_global_too_high",
+        help="Ratios above this value are Too High for Global.",
+    )
+
+    st.caption(
+        "Values between Too Low and Perfect, and between Perfect and Too High, "
+        "are classified as Acceptable Global."
+    )
+
+    st.markdown("#### Neighborhood")
+    method_options = [
+        "Percentile / Quartile Limits (current code)",
+        "Fixed Ratio Limits",
+    ]
+    current_method_index = 1 if thresholds.get("neighborhood_method") == "fixed" else 0
+    method_label = st.radio(
+        "Neighborhood threshold method",
+        method_options,
+        index=current_method_index,
+        horizontal=True,
+        key="thr_neighborhood_method",
+    )
+
+    lower_pct = float(thresholds["neighborhood_lower_percentile"])
+    upper_pct = float(thresholds["neighborhood_upper_percentile"])
+    fixed_low = float(thresholds["neighborhood_fixed_low"])
+    fixed_high = float(thresholds["neighborhood_fixed_high"])
+
+    if method_label.startswith("Percentile"):
+        n1, n2 = st.columns(2)
+        lower_pct = n1.number_input(
+            "Too Low below neighborhood percentile",
+            min_value=0.0,
+            max_value=100.0,
+            value=lower_pct,
+            step=1.0,
+            format="%.1f",
+            key="thr_neighborhood_lower_percentile",
+            help="Current code default is the 25th percentile (Q1).",
+        )
+        upper_pct = n2.number_input(
+            "Too High above neighborhood percentile",
+            min_value=0.0,
+            max_value=100.0,
+            value=upper_pct,
+            step=1.0,
+            format="%.1f",
+            key="thr_neighborhood_upper_percentile",
+            help="Current code default is the 75th percentile (Q3).",
+        )
+        st.caption(
+            "Default behavior: a ratio below Q1 is Neighborhood Too Low; "
+            "above Q3 is Neighborhood Too High; between Q1 and Q3 is Acceptable."
+        )
+        selected_method = "percentile"
+    else:
+        n1, n2 = st.columns(2)
+        fixed_low = n1.number_input(
+            "Neighborhood Too Low below",
+            min_value=0.0,
+            value=fixed_low,
+            step=0.01,
+            format="%.4f",
+            key="thr_neighborhood_fixed_low",
+        )
+        fixed_high = n2.number_input(
+            "Neighborhood Too High above",
+            min_value=0.0,
+            value=fixed_high,
+            step=0.01,
+            format="%.4f",
+            key="thr_neighborhood_fixed_high",
+        )
+        st.caption(
+            "Fixed Ratio Limits use the same low/high cutoffs for every neighborhood "
+            "instead of calculating each neighborhood's percentiles."
+        )
+        selected_method = "fixed"
+
+    apply_col, reset_col = st.columns(2)
+    apply_thresholds = apply_col.button(
+        "✅ Apply Threshold Settings",
+        use_container_width=True,
+        key="apply_ratio_thresholds",
+    )
+    reset_thresholds = reset_col.button(
+        "↩️ Reset to Current Code Defaults",
+        use_container_width=True,
+        key="reset_ratio_thresholds",
+    )
+
+    if apply_thresholds:
+        candidate = {
+            "global_too_low": float(global_too_low),
+            "global_perfect_low": float(global_perfect_low),
+            "global_perfect_high": float(global_perfect_high),
+            "global_too_high": float(global_too_high),
+            "neighborhood_method": selected_method,
+            "neighborhood_lower_percentile": float(lower_pct),
+            "neighborhood_upper_percentile": float(upper_pct),
+            "neighborhood_fixed_low": float(fixed_low),
+            "neighborhood_fixed_high": float(fixed_high),
+        }
+
+        global_order_valid = (
+            candidate["global_too_low"]
+            <= candidate["global_perfect_low"]
+            <= candidate["global_perfect_high"]
+            <= candidate["global_too_high"]
+        )
+        neighborhood_valid = (
+            0.0 <= candidate["neighborhood_lower_percentile"]
+            < candidate["neighborhood_upper_percentile"] <= 100.0
+            if selected_method == "percentile"
+            else candidate["neighborhood_fixed_low"] < candidate["neighborhood_fixed_high"]
+        )
+
+        if not global_order_valid:
+            st.error(
+                "Overall / Global values must be ordered: "
+                "Too Low ≤ Perfect Minimum ≤ Perfect Maximum ≤ Too High."
+            )
+        elif not neighborhood_valid:
+            st.error(
+                "Neighborhood settings are not valid. The lower threshold must be "
+                "less than the upper threshold."
+            )
+        else:
+            st.session_state.ratio_thresholds = candidate
+            st.session_state.last_summary = {
+                "status": "Ratio threshold settings updated. Rerun Ratio Checker or Quality Checker."
+            }
+            st.session_state.extra_tables = {}
+            st.session_state.last_tool = None
+            st.success("Threshold settings applied.")
+            st.rerun()
+
+    if reset_thresholds:
+        st.session_state.ratio_thresholds = DEFAULT_RATIO_THRESHOLDS.copy()
+        for widget_key in [
+            "thr_global_too_low", "thr_global_perfect_low", "thr_global_perfect_high",
+            "thr_global_too_high", "thr_neighborhood_method",
+            "thr_neighborhood_lower_percentile", "thr_neighborhood_upper_percentile",
+            "thr_neighborhood_fixed_low", "thr_neighborhood_fixed_high",
+        ]:
+            st.session_state.pop(widget_key, None)
+        st.session_state.last_summary = {
+            "status": "Ratio thresholds reset to current code defaults."
+        }
+        st.session_state.extra_tables = {}
+        st.session_state.last_tool = None
+        st.rerun()
+
 st.subheader("3 · Tool Menu")
 st.caption("Run tools in any order. Use **Prepare Data** between diagnostics when you want to strip prior generated status columns and start the next check cleanly.")
 
@@ -205,7 +484,7 @@ def run_tool(name, fn, *args):
             st.session_state.df = new_df
             st.session_state.last_summary = summary
             if name in {"Ratio Checker", "Quality Checker"}:
-                neighborhood_table = neighborhood_ratio_statistics(new_df)
+                neighborhood_table = neighborhood_ratio_statistics(new_df, st.session_state.ratio_thresholds)
                 if not neighborhood_table.empty:
                     extra = dict(extra)
                     extra["🏘️ Neighborhood Statistics"] = neighborhood_table
@@ -222,8 +501,8 @@ if date_btn: run_tool("Sale Date Checker", sale_date_checker, int(tax_year))
 if use_btn: run_tool("Use Code Checker", use_code_checker)
 if value_btn: run_tool("Appraisal Value Checker", appraisal_value_checker)
 if deed_btn: run_tool("Deed / MH / Comment Audit", deed_audit_checker)
-if ratio_btn: run_tool("Ratio Checker", ratio_checker)
-if quality_btn: run_tool("Quality Checker", quality_checker)
+if ratio_btn: run_tool("Ratio Checker", ratio_checker, st.session_state.ratio_thresholds)
+if quality_btn: run_tool("Quality Checker", quality_checker, st.session_state.ratio_thresholds)
 if stats_btn: run_tool("Generate Statistics", generate_statistics)
 if reset_results:
     # Reset to prepared/original form without forcing a fresh upload.
