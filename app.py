@@ -241,7 +241,6 @@ def render_user_instructions():
 
 
 st.title("📊 Sales Ratio Quality Checker")
-st.caption("Browser-based version of the Excel/VBA Sales Ratio Quality Checker workflow")
 
 with st.expander("📘 Instructions / User Guide — Click to Open", expanded=False):
     render_user_instructions()
@@ -722,4 +721,3 @@ try:
 except Exception as e:
     st.warning(f"Excel export is not available for the current results: {e}")
 
-st.caption("The web version performs the calculations in Python; it does not execute VBA or require Microsoft Excel on the server.")
