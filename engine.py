@@ -1080,6 +1080,15 @@ STATUS_FILL = {
     "n/a": "E8E8E8",
 }
 
+# Export highlighting is deliberately separate from the status colors above.
+# Only rows that need attention receive a row-wide fill.  The source cell(s)
+# most directly tied to the issue receive a stronger contrasting fill so an
+# analyst can locate the likely problem quickly in Excel.
+ISSUE_ROW_FILL = "FFF2CC"          # pale yellow
+ISSUE_CELL_FILL = "F4B183"         # orange
+CRITICAL_ROW_FILL = "FCE8E6"       # pale red
+CRITICAL_CELL_FILL = "F4CCCC"      # stronger red
+
 
 def status_fill(status: object) -> Optional[str]:
     s = clean_text(status).lower()
@@ -1091,26 +1100,201 @@ def status_fill(status: object) -> Optional[str]:
     return None
 
 
+def _is_issue_status(status: object) -> bool:
+    """Return True only when the current row represents an exception/review condition."""
+    s = clean_text(status).lower()
+    if not s:
+        return False
+    if s.startswith("verified") or s.startswith("n/a"):
+        return False
+
+    # Ratio Checker rows can be good even though the status contains descriptive text.
+    global_issue = "too low for global" in s or "too high for global" in s
+    neighborhood_issue = "neighborhood: too low" in s or "neighborhood: too high" in s
+    if ("perfect global" in s or "acceptable global" in s) and not global_issue and not neighborhood_issue:
+        return False
+
+    issue_terms = (
+        "critical", "error", "review", "unknown", "missing", "invalid",
+        "too low", "too high", "mismatch", "outlier", "bad sale",
+        "manufactured home",
+    )
+    return any(term in s for term in issue_terms)
+
+
+def _critical_issue_status(status: object) -> bool:
+    s = clean_text(status).lower()
+    return "critical" in s or "error" in s
+
+
+def _row_value_blank(row: pd.Series, column: str) -> bool:
+    if column not in row.index:
+        return True
+    value = row[column]
+    if value is None or pd.isna(value):
+        return True
+    return clean_text(value) in {"", "none", "nan", "nat"}
+
+
+def _issue_columns_for_status(df: pd.DataFrame, row: pd.Series, status: object) -> List[str]:
+    """Identify the source columns most directly associated with a row's current status."""
+    s = clean_text(status).lower()
+    selected: List[str] = []
+
+    def add_columns(cols: Sequence[str]):
+        for c in cols:
+            if c in df.columns and c not in selected:
+                selected.append(c)
+
+    def add_logical(name: str):
+        add_columns(columns_for(df, name))
+
+    def add_blank_logical(*names: str):
+        candidates: List[str] = []
+        for name in names:
+            candidates.extend(columns_for(df, name))
+        blank = [c for c in candidates if _row_value_blank(row, c)]
+        add_columns(blank if blank else candidates)
+
+    # Date issues.
+    if "missing sales date" in s or "sale date invalid" in s or "missing sale date information" in s:
+        date_cols = columns_for(df, "sale_date")
+        if date_cols:
+            add_columns(date_cols)
+        else:
+            add_logical("sale_date_year")
+            add_logical("sale_date_month")
+            add_logical("sale_date_day")
+
+    # Use Code / valuation issues. Multiple phrases can exist in one status.
+    if "use code" in s:
+        add_logical("use_code")
+    if "missing or zero land value / total value" in s:
+        add_logical("land_value")
+        add_logical("total_value")
+    elif "missing or zero land value" in s or "missing land value" in s:
+        add_logical("land_value")
+    if "improvement value found on land-only code" in s:
+        add_logical("use_code")
+        add_logical("improvement_value")
+    if "negative miscellaneous improvement value" in s:
+        add_logical("misc_value")
+    if "appraisal value mismatch" in s or "component-to-total value imbalance" in s:
+        add_logical("land_value")
+        add_logical("improvement_value")
+        add_logical("misc_value")
+        add_logical("total_value")
+        add_columns(["Calculated Appraisal Total", "Appraisal Variance"])
+    if "review for manufactured home" in s:
+        add_logical("use_code")
+
+    # Qualification / documentation issues.
+    if "bad sale with no comment" in s:
+        add_logical("qualification")
+        add_blank_logical("comment")
+    if "conflicting qualification" in s or "unknown sale status" in s:
+        add_logical("qualification")
+    if "bad sale with comment" in s:
+        add_logical("qualification")
+        add_logical("comment")
+    if "missing parcel number" in s:
+        add_blank_logical("parcel")
+    if "missing neighborhood / valuation zone" in s:
+        add_blank_logical("neighborhood")
+    if "missing grantor or grantee" in s:
+        add_blank_logical("grantor", "grantee")
+    if "missing deed / neighborhood information" in s:
+        add_blank_logical("deed_book", "deed_page", "neighborhood")
+    if "neighborhood mismatch" in s or "same deed appears in different neighborhoods" in s:
+        add_logical("deed_book")
+        add_logical("deed_page")
+        add_logical("neighborhood")
+    if "possible duplicate transaction" in s:
+        add_logical("grantor")
+        add_logical("grantee")
+        add_logical("sale_date")
+    if "deed correction / self-transfer" in s:
+        add_logical("grantor")
+        add_logical("grantee")
+    if "manufactured home review" in s:
+        add_logical("comment")
+        add_logical("use_code")
+    if "llc-to-llc" in s:
+        add_logical("grantor")
+        add_logical("grantee")
+    if "grantor keyword" in s:
+        add_logical("grantor")
+    if "grantee keyword" in s:
+        add_logical("grantee")
+    if "comment keyword" in s:
+        add_logical("comment")
+
+    # Ratio issues. The ratio itself is the primary cause cell; neighborhood is
+    # also highlighted when the exception is neighborhood-specific.
+    global_ratio_issue = (
+        "global ratio outlier" in s
+        or "global and neighborhood ratio outlier" in s
+        or "too low for global" in s
+        or "too high for global" in s
+    )
+    neighborhood_ratio_issue = (
+        "neighborhood ratio outlier" in s
+        or "global and neighborhood ratio outlier" in s
+        or "neighborhood: too low" in s
+        or "neighborhood: too high" in s
+    )
+    if global_ratio_issue or neighborhood_ratio_issue:
+        add_logical("ratio")
+    if neighborhood_ratio_issue:
+        add_logical("neighborhood")
+        add_columns([NEIGHBORHOOD_CHECK_COL])
+
+    # If a status is an issue but no more-specific rule matched, keep the Flag
+    # Status cell as the visual locator rather than guessing at a source field.
+    return selected
+
+
 def export_results_xlsx(df: pd.DataFrame, summary: Dict[str, object], extra_tables: Optional[Dict[str, pd.DataFrame]] = None) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Analysis"
     headers = list(df.columns)
+    header_index = {h: j for j, h in enumerate(headers, 1)}
     for j, h in enumerate(headers, 1):
         cell = ws.cell(1, j, h)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F4E78")
         cell.alignment = Alignment(horizontal="left")
+
     for i, (_, row) in enumerate(df.iterrows(), 2):
         status = row.get(STATUS_COL, "")
-        fill_color = status_fill(status)
+        issue = _is_issue_status(status)
+        critical = _critical_issue_status(status)
+        row_fill = CRITICAL_ROW_FILL if critical else ISSUE_ROW_FILL
+        source_fill = CRITICAL_CELL_FILL if critical else ISSUE_CELL_FILL
+        issue_columns = set(_issue_columns_for_status(df, row, status)) if issue else set()
+
         for j, h in enumerate(headers, 1):
             val = row[h]
-            if pd.isna(val): val = None
-            if isinstance(val, pd.Timestamp): val = val.to_pydatetime()
+            if pd.isna(val):
+                val = None
+            if isinstance(val, pd.Timestamp):
+                val = val.to_pydatetime()
             cell = ws.cell(i, j, val)
-            if fill_color:
-                cell.fill = PatternFill("solid", fgColor=fill_color)
+            if issue:
+                cell.fill = PatternFill("solid", fgColor=row_fill)
+            if h in issue_columns:
+                cell.fill = PatternFill("solid", fgColor=source_fill)
+
+        # Keep the Flag Status wording and its existing status color. Verified /
+        # Perfect rows stay otherwise unshaded, while issue rows retain the row
+        # and source-cell highlighting described above.
+        if STATUS_COL in header_index:
+            status_cell = ws.cell(i, header_index[STATUS_COL])
+            status_color = status_fill(status)
+            if status_color:
+                status_cell.fill = PatternFill("solid", fgColor=status_color)
+
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     for j, h in enumerate(headers, 1):
@@ -1129,8 +1313,28 @@ def export_results_xlsx(df: pd.DataFrame, summary: Dict[str, object], extra_tabl
         dash.cell(r, 1, str(k).replace("_", " ").title()).font = Font(bold=True)
         dash.cell(r, 2, v)
         r += 1
+
+    r += 1
+    dash.cell(r, 1, "Analysis Sheet Highlighting").font = Font(bold=True)
+    r += 1
+    dash.cell(r, 1, "Issue row")
+    dash.cell(r, 2, "Row requires review; the row is shaded for quick identification.")
+    dash.cell(r, 1).fill = PatternFill("solid", fgColor=ISSUE_ROW_FILL)
+    r += 1
+    dash.cell(r, 1, "Specific issue cell(s)")
+    dash.cell(r, 2, "Stronger contrasting fill marks the field(s) most directly tied to the status.")
+    dash.cell(r, 1).fill = PatternFill("solid", fgColor=ISSUE_CELL_FILL)
+    r += 1
+    dash.cell(r, 1, "Critical / error issue")
+    dash.cell(r, 2, "Critical/error rows use red-toned versions of the same row/cell highlighting.")
+    dash.cell(r, 1).fill = PatternFill("solid", fgColor=CRITICAL_CELL_FILL)
+    r += 1
+    dash.cell(r, 1, "Verified / good row")
+    dash.cell(r, 2, "No row-wide issue shading. The Flag Status text and its normal status color are preserved.")
+    dash.cell(r, 1).fill = PatternFill("solid", fgColor=STATUS_FILL["verified"])
+
     dash.column_dimensions["A"].width = 34
-    dash.column_dimensions["B"].width = 50
+    dash.column_dimensions["B"].width = 80
 
     for name, table in (extra_tables or {}).items():
         title = name[:31]
