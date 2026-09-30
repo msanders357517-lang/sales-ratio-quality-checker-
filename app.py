@@ -13,6 +13,7 @@ from engine import (
     export_results_xlsx,
     generate_statistics,
     prepare_data,
+    neighborhood_ratio_statistics,
     quality_checker,
     ratio_checker,
     read_uploaded_workbook,
@@ -108,63 +109,64 @@ c5.metric("Last Tool", st.session_state.last_tool or "—")
 
 st.subheader("2 · Field Mapping Review")
 st.caption("Review the proposed source field for each standardized application field. Change any selection before running the checkers. Your selection becomes authoritative for the analytical engine.")
+with st.expander("▶ Review / Change Field Mapping", expanded=False):
 
-raw_map_df = st.session_state.raw_df
-map_report = st.session_state.mapping_report
-if raw_map_df is not None and map_report is not None:
-    with st.form("field_mapping_form"):
-        mapping_choices = {}
-        display_rows = map_report[map_report["Canonical Header"].astype(str).str.len() > 0].copy()
-        for start in range(0, len(display_rows), 2):
-            cols = st.columns(2)
-            for ui_col, (_, row) in zip(cols, display_rows.iloc[start:start+2].iterrows()):
-                field = str(row["System Field"])
-                canonical = str(row["Canonical Header"])
-                options = mapping_options(raw_map_df, field, row)
-                current = st.session_state.mapping_overrides.get(field)
-                if current is None:
-                    detected = str(row.get("Detected Header", "") or "")
-                    if detected.startswith("DERIVED:"):
-                        current = DERIVED_RATIO_OPTION
-                    elif detected in options:
-                        current = detected
-                    elif field == "sales_ratio" and str(row.get("Status", "")) == "Missing":
-                        current = DERIVED_RATIO_OPTION
-                    else:
-                        current = DO_NOT_MAP_OPTION
-                if current not in options:
-                    options.insert(0, current)
-                idx = options.index(current)
-                mapping_choices[field] = ui_col.selectbox(
-                    canonical, options, index=idx, key=f"map_select_{field}",
-                    help=f"Choose which uploaded source column should become the standardized {canonical} field."
-                )
-        apply_mapping = st.form_submit_button("✅ Apply Field Mapping", use_container_width=True)
+    raw_map_df = st.session_state.raw_df
+    map_report = st.session_state.mapping_report
+    if raw_map_df is not None and map_report is not None:
+        with st.form("field_mapping_form"):
+            mapping_choices = {}
+            display_rows = map_report[map_report["Canonical Header"].astype(str).str.len() > 0].copy()
+            for start in range(0, len(display_rows), 2):
+                cols = st.columns(2)
+                for ui_col, (_, row) in zip(cols, display_rows.iloc[start:start+2].iterrows()):
+                    field = str(row["System Field"])
+                    canonical = str(row["Canonical Header"])
+                    options = mapping_options(raw_map_df, field, row)
+                    current = st.session_state.mapping_overrides.get(field)
+                    if current is None:
+                        detected = str(row.get("Detected Header", "") or "")
+                        if detected.startswith("DERIVED:"):
+                            current = DERIVED_RATIO_OPTION
+                        elif detected in options:
+                            current = detected
+                        elif field == "sales_ratio" and str(row.get("Status", "")) == "Missing":
+                            current = DERIVED_RATIO_OPTION
+                        else:
+                            current = DO_NOT_MAP_OPTION
+                    if current not in options:
+                        options.insert(0, current)
+                    idx = options.index(current)
+                    mapping_choices[field] = ui_col.selectbox(
+                        canonical, options, index=idx, key=f"map_select_{field}",
+                        help=f"Choose which uploaded source column should become the standardized {canonical} field."
+                    )
+            apply_mapping = st.form_submit_button("✅ Apply Field Mapping", use_container_width=True)
 
-    if apply_mapping:
-        try:
-            mapped_df, new_report, new_detection = canonicalize(raw_map_df, overrides=mapping_choices)
-            st.session_state.mapping_overrides = mapping_choices.copy()
-            st.session_state.df = mapped_df
-            st.session_state.original_df = mapped_df.copy()
-            st.session_state.mapping_report = new_report
-            st.session_state.vendor_detection = new_detection
-            st.session_state.last_summary = {
-                "status": "Field mapping applied",
-                "detected_vendor": new_detection.get("vendor", "Unknown"),
-                "rows_loaded": len(mapped_df),
-                "columns_loaded": len(mapped_df.columns),
-            }
-            st.session_state.extra_tables = {}
-            st.session_state.last_tool = None
-            st.session_state.prepared = False
-            st.success("Field mapping applied. The checker engine will now use these standardized selections.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Could not apply the selected field mapping: {e}")
+        if apply_mapping:
+            try:
+                mapped_df, new_report, new_detection = canonicalize(raw_map_df, overrides=mapping_choices)
+                st.session_state.mapping_overrides = mapping_choices.copy()
+                st.session_state.df = mapped_df
+                st.session_state.original_df = mapped_df.copy()
+                st.session_state.mapping_report = new_report
+                st.session_state.vendor_detection = new_detection
+                st.session_state.last_summary = {
+                    "status": "Field mapping applied",
+                    "detected_vendor": new_detection.get("vendor", "Unknown"),
+                    "rows_loaded": len(mapped_df),
+                    "columns_loaded": len(mapped_df.columns),
+                }
+                st.session_state.extra_tables = {}
+                st.session_state.last_tool = None
+                st.session_state.prepared = False
+                st.success("Field mapping applied. The checker engine will now use these standardized selections.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not apply the selected field mapping: {e}")
 
-    with st.expander("🔎 Mapping Details", expanded=False):
-        st.dataframe(st.session_state.mapping_report, use_container_width=True, hide_index=True)
+        with st.expander("🔎 Mapping Details", expanded=False):
+            st.dataframe(st.session_state.mapping_report, use_container_width=True, hide_index=True)
 
 st.subheader("3 · Tool Menu")
 st.caption("Run tools in any order. Use **Prepare Data** between diagnostics when you want to strip prior generated status columns and start the next check cleanly.")
@@ -202,6 +204,11 @@ def run_tool(name, fn, *args):
                 new_df, extra, summary = result
             st.session_state.df = new_df
             st.session_state.last_summary = summary
+            if name in {"Ratio Checker", "Quality Checker"}:
+                neighborhood_table = neighborhood_ratio_statistics(new_df)
+                if not neighborhood_table.empty:
+                    extra = dict(extra)
+                    extra["🏘️ Neighborhood Statistics"] = neighborhood_table
             st.session_state.extra_tables = extra
             st.session_state.last_tool = name
         st.success(f"{name} complete.")
@@ -245,7 +252,7 @@ else:
     st.caption("Run a checker to populate the dashboard.")
 
 for name, table in (st.session_state.extra_tables or {}).items():
-    with st.expander(name, expanded=True):
+    with st.expander(name, expanded=False):
         st.dataframe(table, use_container_width=True, hide_index=True)
 
 st.subheader("5 · Analysis Results")
