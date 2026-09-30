@@ -182,6 +182,24 @@ The full **📘 Instructions / User Guide** is at the top of the main page.
 - **Critical dual outlier:** the same record is outside both Global and Neighborhood limits.
 - **Neighborhood Statistics:** appears under the Dashboard after Ratio or Quality analysis when data are available.
 - **Clear Results:** clears checker output without removing the uploaded workbook.
+
+**Checker Quick Reference**
+
+| Tool | Brief description |
+|---|---|
+| **Prepare Data** | Standardizes and cleans the mapped data so the analytical checkers can run correctly. |
+| **Sale Date Checker** | Checks for missing sale dates and dates outside the selected study period. |
+| **Use Code Checker** | Reviews Use Codes and related land/improvement conditions for records needing review. |
+| **Appraisal Value Checker** | Confirms land, improvement, and miscellaneous values reconcile to total appraised value. |
+| **Deed / MH / Comment Audit** | Reviews deed, party, qualification, manufactured-home, comment, duplicate, and bad-sale conditions. |
+| **Ratio Checker** | Calculates L, B, and L&B ratios and compares them with Global and Neighborhood limits. |
+| **Quality Checker** | Runs a broader combined quality review and identifies the reasons a record requires attention. |
+| **Generate Statistics** | Produces summary statistics for the current prepared/analysis data. |
+| **Clear Results** | Removes the current checker output while keeping the uploaded workbook loaded. |
+
+**Export / Download Processed Workbook**
+
+Use **Download Processed Workbook** after reviewing the results. The exported Excel workbook keeps the original working data together with the generated checker statuses, flags, reasons, calculated fields, and other analysis output that is available from the current run. This lets you continue reviewing, documenting, filtering, or sharing the results outside the web application without having to recreate the analysis manually.
 """
 
 
